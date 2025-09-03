@@ -265,11 +265,14 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                     
                     # Show detailed status
                     elapsed = (datetime.now() - start_time).total_seconds()
-                    avg_time = elapsed / current_test if current_test > 0 else 0
-                    remaining = (total_tests - current_test) * avg_time
+                    if current_test > 1 and current_test < total_tests:
+                        avg_time = elapsed / (current_test - 1)  # Use completed tests only
+                        remaining = (total_tests - current_test) * avg_time
+                        timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s | Est. remaining: {remaining:.1f}s")
+                    else:
+                        timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s")
                     
                     status_text.text(f"Testing {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
-                    timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s | Est. remaining: {remaining:.1f}s")
                     
                     # Run the actual test
                     result = asyncio.run(run_single_test(
@@ -314,10 +317,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         if st.session_state.browser_manager:
             asyncio.run(st.session_state.browser_manager.cleanup())
         
-        # Clear progress indicators
-        progress_bar.empty()
-        status_text.empty()
-        timing_text.empty()
+        # Don't clear progress indicators immediately, let user see final state
 
 async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time):
     """Run a single visual regression test"""
