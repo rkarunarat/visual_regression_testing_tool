@@ -52,7 +52,12 @@ class BrowserManager:
                     '--no-first-run',
                     '--disable-background-timer-throttling',
                     '--disable-renderer-backgrounding',
-                    '--disable-backgrounding-occluded-windows'
+                    '--disable-backgrounding-occluded-windows',
+                    '--single-process',
+                    '--disable-software-rasterizer',
+                    '--disable-background-networking',
+                    '--disable-default-apps',
+                    '--disable-sync'
                 ]
             }
             
