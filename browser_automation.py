@@ -80,15 +80,23 @@ class BrowserManager:
                     logger.info(f"Successfully launched {browser_name} with minimal options")
                 except Exception as e2:
                     logger.warning(f"Minimal launch also failed for {browser_name}: {e2}")
-                    # Final fallback: try to use Firefox if Chrome fails
+                    # Try multiple fallbacks
                     if browser_name == 'Chrome':
+                        # Try Firefox first
                         try:
                             logger.info("Trying Firefox as fallback...")
                             self.browsers[browser_name] = await self.playwright.firefox.launch(headless=True)
                             logger.info("Successfully launched Firefox as Chrome fallback")
                         except Exception as e3:
-                            logger.error(f"All browser launch attempts failed: {e3}")
-                            raise RuntimeError(f"Cannot launch any browser: Chrome failed ({e}), Firefox fallback failed ({e3})")
+                            logger.warning(f"Firefox fallback failed: {e3}")
+                            # Try WebKit as final fallback
+                            try:
+                                logger.info("Trying WebKit as final fallback...")
+                                self.browsers[browser_name] = await self.playwright.webkit.launch(headless=True)
+                                logger.info("Successfully launched WebKit as final fallback")
+                            except Exception as e4:
+                                logger.error(f"All browser fallbacks failed: {e4}")
+                                raise RuntimeError(f"Cannot launch any browser: Chrome failed ({e}), Firefox failed ({e3}), WebKit failed ({e4})")
                     else:
                         raise
         
