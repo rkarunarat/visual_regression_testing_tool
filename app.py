@@ -12,6 +12,7 @@ from image_comparison import ImageComparator
 from result_manager import ResultManager
 from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS
 from utils import create_download_link
+import shutil
 
 # Page configuration
 st.set_page_config(
@@ -28,6 +29,12 @@ if 'current_test_id' not in st.session_state:
     st.session_state.current_test_id = None
 if 'browser_manager' not in st.session_state:
     st.session_state.browser_manager = None
+if 'stop_testing' not in st.session_state:
+    st.session_state.stop_testing = False
+if 'test_running' not in st.session_state:
+    st.session_state.test_running = False
+if 'cleanup_needed' not in st.session_state:
+    st.session_state.cleanup_needed = False
 
 def initialize_browser_manager():
     """Initialize browser manager if not already done"""
@@ -77,7 +84,7 @@ def main():
         )
 
     # Main content area
-    tab1, tab2, tab3 = st.tabs(["URL Configuration", "Test Results", "Detailed Comparison"])
+    tab1, tab2, tab3, tab4 = st.tabs(["URL Configuration", "Test Results", "Detailed Comparison", "Manage Test Runs"])
     
     with tab1:
         configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time)
@@ -87,6 +94,9 @@ def main():
     
     with tab3:
         detailed_comparison_tab()
+    
+    with tab4:
+        manage_test_runs_tab()
 
 def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time):
     st.header("URL Configuration")
@@ -149,16 +159,47 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
             except Exception as e:
                 st.error(f"Error reading CSV: {str(e)}")
     
-    # Run tests
-    if st.button("Run Visual Regression Tests", type="primary") and url_pairs:
-        if not selected_browsers:
-            st.error("Please select at least one browser")
-            return
-        if not selected_devices:
-            st.error("Please select at least one device")
-            return
+    # Run/Stop test controls
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        if not st.session_state.test_running:
+            if st.button("Run Visual Regression Tests", type="primary") and url_pairs:
+                if not selected_browsers:
+                    st.error("Please select at least one browser")
+                    return
+                if not selected_devices:
+                    st.error("Please select at least one device")
+                    return
+                
+                st.session_state.stop_testing = False
+                st.session_state.test_running = True
+                run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time)
+        else:
+            st.info("⏳ Test is currently running...")
+    
+    with col2:
+        if st.session_state.test_running:
+            if st.button("🛑 Stop Tests", type="secondary"):
+                st.session_state.stop_testing = True
+                st.session_state.cleanup_needed = True
+                st.warning("⚠️ Stopping tests...")
+    
+    # Cleanup dialog
+    if st.session_state.cleanup_needed:
+        st.warning("Tests were stopped mid-process. What would you like to do with partial results?")
+        cleanup_col1, cleanup_col2 = st.columns(2)
         
-        run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time)
+        with cleanup_col1:
+            if st.button("🗑️ Clean Up Partial Results"):
+                cleanup_partial_results()
+                st.session_state.cleanup_needed = False
+                st.success("Partial results cleaned up!")
+        
+        with cleanup_col2:
+            if st.button("💾 Keep Partial Results"):
+                st.session_state.cleanup_needed = False
+                st.info("Partial results preserved.")
 
 def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     """Run visual regression tests"""
@@ -186,6 +227,12 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         for url_pair in url_pairs:
             for browser in browsers:
                 for device in devices:
+                    # Check for stop signal
+                    if st.session_state.stop_testing:
+                        status_text.text("🛑 Tests stopped by user")
+                        st.session_state.test_running = False
+                        return
+                    
                     current_test += 1
                     progress = current_test / total_tests
                     progress_bar.progress(progress)
@@ -225,6 +272,8 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     except Exception as e:
         st.error(f"Error during testing: {str(e)}")
     finally:
+        # Reset test state
+        st.session_state.test_running = False
         # Cleanup browser manager
         if st.session_state.browser_manager:
             asyncio.run(st.session_state.browser_manager.cleanup())
@@ -419,6 +468,165 @@ def detailed_comparison_tab():
                 st.caption("Red areas indicate differences between staging and production")
             else:
                 st.info("No differences detected")
+
+def cleanup_partial_results():
+    """Clean up partial test results from interrupted tests"""
+    try:
+        result_manager = ResultManager()
+        if st.session_state.current_test_id:
+            result_manager.delete_test_run(st.session_state.current_test_id)
+            st.session_state.current_test_id = None
+            st.session_state.test_results = []
+    except Exception as e:
+        st.error(f"Error cleaning up partial results: {e}")
+
+def manage_test_runs_tab():
+    """Tab for managing old test runs and storage"""
+    st.header("📁 Manage Test Runs")
+    
+    result_manager = ResultManager()
+    test_runs = result_manager.list_test_runs()
+    
+    if not test_runs:
+        st.info("No test runs found.")
+        return
+    
+    # Summary stats
+    total_runs = len(test_runs)
+    total_size = 0
+    try:
+        for run in test_runs:
+            run_path = result_manager.results_dir / run['test_id']
+            if run_path.exists():
+                total_size += sum(f.stat().st_size for f in run_path.rglob('*') if f.is_file())
+    except:
+        total_size = 0
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Test Runs", total_runs)
+    with col2:
+        st.metric("Storage Used", f"{total_size / (1024*1024):.1f} MB")
+    with col3:
+        st.metric("Oldest Run", test_runs[-1]['test_id'][:8] if test_runs else "None")
+    
+    # Cleanup options
+    st.subheader("🧹 Storage Management")
+    
+    cleanup_col1, cleanup_col2 = st.columns(2)
+    
+    with cleanup_col1:
+        days_to_keep = st.number_input("Keep runs from last N days", min_value=1, max_value=365, value=30)
+        if st.button("🗓️ Clean Old Runs"):
+            cleaned = result_manager.cleanup_old_results(days_to_keep)
+            st.success(f"Cleaned up {cleaned} old test runs")
+            st.rerun()
+    
+    with cleanup_col2:
+        if st.button("🗑️ Delete All Runs", type="secondary"):
+            if st.checkbox("I understand this will delete all test results"):
+                try:
+                    shutil.rmtree(result_manager.results_dir)
+                    result_manager.results_dir.mkdir(exist_ok=True)
+                    result_manager.screenshots_dir.mkdir(exist_ok=True)
+                    st.success("All test runs deleted!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error deleting runs: {e}")
+    
+    # List existing runs
+    st.subheader("📊 Existing Test Runs")
+    
+    if test_runs:
+        # Create dataframe for display
+        run_data = []
+        for run in test_runs:
+            # Get summary stats for each run
+            stats = result_manager.get_summary_stats(run['test_id'])
+            run_data.append({
+                'Test ID': run['test_id'],
+                'Tests': run['result_count'],
+                'Pass Rate': f"{stats.get('pass_rate', 0):.1f}%" if stats else "N/A",
+                'Latest Run': run['latest_timestamp'][:19] if run['latest_timestamp'] else "N/A",
+                'Actions': run['test_id']
+            })
+        
+        df = pd.DataFrame(run_data)
+        
+        # Display dataframe
+        st.dataframe(
+            df.drop('Actions', axis=1),
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Simple selection using selectbox
+        st.subheader("🎯 Select Test Run for Actions")
+        if len(test_runs) > 0:
+            selected_run_index = st.selectbox(
+                "Choose a test run:",
+                range(len(test_runs)),
+                format_func=lambda x: f"{test_runs[x]['test_id']} ({test_runs[x]['result_count']} tests)"
+            )
+            
+            selected_runs = [test_runs[selected_run_index]['test_id']]
+            
+            action_col1, action_col2, action_col3 = st.columns(3)
+            
+            with action_col1:
+                if st.button("📊 Load Results"):
+                    # Load results from selected run
+                    all_results = []
+                    for run_id in selected_runs:
+                        results = result_manager.load_test_results(run_id)
+                        for result in results:
+                            # Add run_id for context
+                            result['run_id'] = run_id
+                            all_results.append(result)
+                    st.session_state.test_results = all_results
+                    st.success(f"Loaded {len(all_results)} results from test run")
+            
+            with action_col2:
+                if st.button("📥 Export Run"):
+                    export_selected_runs(selected_runs, result_manager)
+            
+            with action_col3:
+                if st.button("🗑️ Delete Run", type="secondary"):
+                    if st.checkbox("Confirm deletion of this test run"):
+                        for run_id in selected_runs:
+                            result_manager.delete_test_run(run_id)
+                        st.success("Test run deleted")
+                        st.rerun()
+        else:
+            st.info("No test runs available for selection")
+
+def export_selected_runs(run_ids, result_manager):
+    """Export selected test runs as ZIP"""
+    try:
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            
+            for run_id in run_ids:
+                results = result_manager.load_test_results(run_id)
+                run_dir = result_manager.results_dir / run_id
+                
+                # Add all files from the run directory
+                if run_dir.exists():
+                    for file_path in run_dir.rglob('*'):
+                        if file_path.is_file():
+                            arc_name = f"{run_id}/{file_path.relative_to(run_dir)}"
+                            zip_file.write(file_path, arc_name)
+        
+        zip_buffer.seek(0)
+        
+        # Create download link
+        b64 = base64.b64encode(zip_buffer.read()).decode()
+        href = f'<a href="data:application/zip;base64,{b64}" download="selected_test_runs.zip">Download Selected Runs</a>'
+        st.markdown(href, unsafe_allow_html=True)
+        st.success("Export prepared! Click the download link above.")
+        
+    except Exception as e:
+        st.error(f"Error exporting runs: {e}")
 
 def export_results(df):
     """Export test results as CSV and images as ZIP"""

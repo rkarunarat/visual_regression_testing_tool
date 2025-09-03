@@ -1,0 +1,14 @@
+{
+  "test_name": "Test 1",
+  "browser": "Chrome",
+  "device": "Desktop",
+  "staging_url": "https://qa.careeranchorsonline.com/",
+  "production_url": "https://www.careeranchorsonline.com/",
+  "similarity_score": 99.80684805435823,
+  "is_match": true,
+  "timestamp": "2025-09-03T16:35:29.755583",
+  "screenshot_paths": {
+    "staging": "test_20250903_163450/Test1_Chrome_Desktop_2025-09-03T163529755583_staging.png",
+    "production": "test_20250903_163450/Test1_Chrome_Desktop_2025-09-03T163529755583_production.png"
+  }
+}
