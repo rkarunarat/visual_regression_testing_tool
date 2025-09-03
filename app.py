@@ -178,20 +178,18 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        if not st.session_state.test_running:
-            if st.button("Run Visual Regression Tests", type="primary") and url_pairs:
-                if not selected_browsers:
-                    st.error("Please select at least one browser")
-                    return
-                if not selected_devices:
-                    st.error("Please select at least one device")
-                    return
-                
-                st.session_state.stop_testing = False
-                st.session_state.test_running = True
-                run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time)
-        else:
-            st.info("⏳ Test is currently running...")
+        run_tests_clicked = st.button("Run Visual Regression Tests", type="primary", disabled=st.session_state.test_running)
+        
+        if run_tests_clicked and url_pairs:
+            if not selected_browsers:
+                st.error("Please select at least one browser")
+                return
+            if not selected_devices:
+                st.error("Please select at least one device")
+                return
+            
+            st.session_state.stop_testing = False
+            run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time)
     
     with col2:
         if st.session_state.test_running:
@@ -199,6 +197,10 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
                 st.session_state.stop_testing = True
                 st.session_state.cleanup_needed = True
                 st.warning("⚠️ Stopping tests...")
+    
+    # Show current status
+    if st.session_state.test_running:
+        st.info("⏳ Test is currently running...")
     
     # Cleanup dialog
     if st.session_state.cleanup_needed:
@@ -218,6 +220,9 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
 
 def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     """Run visual regression tests"""
+    # Set test running state
+    st.session_state.test_running = True
+    
     initialize_browser_manager()
     
     # Create progress indicators
@@ -282,7 +287,10 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         if results:
             passed = sum(1 for r in results if r['is_match'])
             failed = len(results) - passed
-            st.info(f"📊 Results: {passed} passed, {failed} failed | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
+            st.success(f"📊 Results: {passed} passed, {failed} failed | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
+        
+        # Trigger rerun to show results in other tabs
+        st.balloons()
         
     except Exception as e:
         st.error(f"Error during testing: {str(e)}")
@@ -292,6 +300,10 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         # Cleanup browser manager
         if st.session_state.browser_manager:
             asyncio.run(st.session_state.browser_manager.cleanup())
+        
+        # Force app refresh to show updated results
+        if not st.session_state.stop_testing:
+            st.rerun()
 
 async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time):
     """Run a single visual regression test"""
