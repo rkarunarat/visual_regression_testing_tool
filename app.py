@@ -42,74 +42,27 @@ def initialize_browser_manager():
         st.session_state.browser_manager = BrowserManager()
 
 def main():
-    # Custom CSS for modern dark green theme
+    # Simple dark theme with subtle green accents
     st.markdown("""
     <style>
-    .main-header {
-        background: linear-gradient(90deg, #2E8B57 0%, #228B22 100%);
-        padding: 1rem 2rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    .metric-card {
-        background: #1E3A3A;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #2E8B57;
-        margin: 0.5rem 0;
-    }
-    .success-box {
+    .stButton > button[kind="primary"] {
         background: #2E8B57;
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-    }
-    .stButton > button {
-        background: #2E8B57;
-        color: white;
         border: none;
         border-radius: 6px;
-        padding: 0.5rem 1rem;
         font-weight: 500;
-        transition: all 0.3s ease;
     }
-    .stButton > button:hover {
+    .stButton > button[kind="primary"]:hover {
         background: #228B22;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(46, 139, 87, 0.3);
-    }
-    .stop-button {
-        background: #DC143C !important;
-    }
-    .stop-button:hover {
-        background: #B22222 !important;
-    }
-    .sidebar .stSelectbox > div > div {
-        background-color: #1E3A3A;
     }
     </style>
     """, unsafe_allow_html=True)
     
-    # Modern header
-    st.markdown("""
-    <div class="main-header">
-        <h1 style="margin:0; font-size: 2.5rem;">🔍 Visual Regression Testing Tool</h1>
-        <p style="margin:0.5rem 0 0 0; opacity: 0.9; font-size: 1.1rem;">
-            Professional visual comparison across multiple browsers and devices
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.title("🔍 Visual Regression Testing Tool")
+    st.markdown("Professional visual comparison across multiple browsers and devices")
 
     # Sidebar for configuration
     with st.sidebar:
-        st.markdown("""
-        <div style="background: #1E3A3A; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-            <h2 style="color: #2E8B57; margin: 0; font-size: 1.5rem;">⚙️ Test Configuration</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        st.header("⚙️ Test Configuration")
         
         # Browser selection
         selected_browsers = st.multiselect(
@@ -128,11 +81,7 @@ def main():
         )
         
         # Comparison settings
-        st.markdown("""
-        <div style="background: #1E3A3A; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
-            <h3 style="color: #2E8B57; margin: 0 0 1rem 0;">🎯 Comparison Settings</h3>
-        </div>
-        """, unsafe_allow_html=True)
+        st.subheader("🎯 Comparison Settings")
         similarity_threshold = st.slider(
             "Similarity Threshold (%)",
             min_value=50,
@@ -246,8 +195,7 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
     
     with col2:
         if st.session_state.test_running:
-            st.markdown('<style>.stop-btn button {background: #DC143C !important;}</style>', unsafe_allow_html=True)
-            if st.button("🛑 Stop Tests", key="stop_btn", help="Stop the current test run"):
+            if st.button("🛑 Stop Tests", help="Stop the current test run"):
                 st.session_state.stop_testing = True
                 st.session_state.cleanup_needed = True
                 st.warning("⚠️ Stopping tests...")
@@ -419,38 +367,17 @@ def display_results_tab():
     passed_tests = sum(1 for r in st.session_state.test_results if r['is_match'])
     failed_tests = total_tests - passed_tests
     
-    # Modern metrics display
+    # Summary statistics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style="color: #2E8B57; margin: 0;">📊 Total Tests</h3>
-            <h2 style="margin: 0.5rem 0 0 0; color: #FAFAFA;">{total_tests}</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("📊 Total Tests", total_tests)
     with col2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style="color: #2E8B57; margin: 0;">✅ Passed</h3>
-            <h2 style="margin: 0.5rem 0 0 0; color: #32CD32;">{passed_tests}</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("✅ Passed", passed_tests)
     with col3:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style="color: #2E8B57; margin: 0;">❌ Failed</h3>
-            <h2 style="margin: 0.5rem 0 0 0; color: #FF6B6B;">{failed_tests}</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("❌ Failed", failed_tests)
     with col4:
         pass_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
-        color = "#32CD32" if pass_rate >= 80 else "#FFD700" if pass_rate >= 60 else "#FF6B6B"
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style="color: #2E8B57; margin: 0;">📈 Pass Rate</h3>
-            <h2 style="margin: 0.5rem 0 0 0; color: {color};">{pass_rate:.1f}%</h2>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("📈 Pass Rate", f"{pass_rate:.1f}%")
     
     # Filter options
     col1, col2, col3 = st.columns(3)
