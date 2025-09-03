@@ -50,6 +50,7 @@ def main():
         border: none;
         border-radius: 6px;
         font-weight: 500;
+        color: white !important;
     }
     .stButton > button[kind="primary"]:hover {
         background: #228B22;
@@ -286,26 +287,33 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         # Store results in session state
         st.session_state.test_results = results
         
+        # Complete the test successfully
         progress_bar.progress(1.0)
         total_time = (datetime.now() - start_time).total_seconds()
-        status_text.text("Tests completed!")
+        status_text.text("🎉 All tests completed successfully!")
         timing_text.text(f"✅ Total time: {total_time:.1f}s")
-        st.success(f"Completed {len(results)} tests successfully in {total_time:.1f} seconds!")
         
-        # Show quick summary
-        if results:
+        # Show completion status
+        if len(results) > 0:
             passed = sum(1 for r in results if r['is_match'])
             failed = len(results) - passed
-            st.success(f"📊 Results: {passed} passed, {failed} failed | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
+            
+            st.success(f"🎉 Completed {len(results)} tests successfully in {total_time:.1f} seconds!")
+            st.success(f"📊 **Results Summary**: {passed} passed, {failed} failed | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
             
             # Show results immediately in expandable section
             with st.expander("📋 Quick Results Summary", expanded=True):
                 for i, result in enumerate(results, 1):
                     status = "✅ Pass" if result['is_match'] else "❌ Fail"
                     st.write(f"**Test {i}**: {result['test_name']} - {result['browser']} ({result['device']}) - {status} - {result['similarity_score']:.1f}%")
-        
-        # Trigger rerun to show results in other tabs
-        st.balloons()
+            
+            # Clear guidance for next steps
+            st.info("💡 **Next Steps**: Switch to 'Test Results' or 'Detailed Comparison' tabs to view full results and images")
+            
+            # Trigger celebration
+            st.balloons()
+        else:
+            st.warning("⚠️ Tests completed but no results were generated. Please check your URLs and try again.")
         
     except Exception as e:
         st.error(f"Error during testing: {str(e)}")
