@@ -25,16 +25,16 @@ class ResultManager:
             # Save screenshots
             screenshot_paths = self._save_screenshots(test_dir, result)
             
-            # Create result metadata (without binary data)
+            # Create result metadata (without binary data) - ensure JSON serializable
             result_metadata = {
-                'test_name': result['test_name'],
-                'browser': result['browser'],
-                'device': result['device'],
-                'staging_url': result['staging_url'],
-                'production_url': result['production_url'],
-                'similarity_score': result['similarity_score'],
-                'is_match': result['is_match'],
-                'timestamp': result['timestamp'],
+                'test_name': str(result['test_name']),
+                'browser': str(result['browser']),
+                'device': str(result['device']),
+                'staging_url': str(result['staging_url']),
+                'production_url': str(result['production_url']),
+                'similarity_score': float(result['similarity_score']),
+                'is_match': bool(result['is_match']),
+                'timestamp': str(result['timestamp']),
                 'screenshot_paths': screenshot_paths
             }
             
