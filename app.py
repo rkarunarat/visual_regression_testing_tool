@@ -5,14 +5,20 @@ from datetime import datetime
 import os
 import base64
 from io import BytesIO
+from pathlib import Path
 import zipfile
 
-from browser_automation import BrowserManager
-from image_comparison import ImageComparator
-from result_manager import ResultManager
-from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS
-from utils import create_download_link
+from browser_manager import BrowserManager
+from image_comparator import ImageComparator
+from results_store import ResultManager
+from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP
+from utils import create_download_link, resize_image_for_display
+from pathlib import Path
 import shutil
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import cm
+from reportlab.lib.utils import ImageReader
 
 # Page configuration
 st.set_page_config(
@@ -61,58 +67,75 @@ def main():
     st.title("🔍 Visual Regression Testing Tool")
     st.markdown("Professional visual comparison across multiple browsers and devices")
 
-    # Sidebar for configuration
+    # Sidebar navigation
     with st.sidebar:
-        st.header("⚙️ Test Configuration")
-        
-        # Browser selection
-        selected_browsers = st.multiselect(
-            "Select Browsers",
-            options=list(BROWSERS.keys()),
-            default=["Chrome", "Firefox"],
-            help="Choose browsers for testing"
-        )
-        
-        # Device selection
-        selected_devices = st.multiselect(
-            "Select Devices",
-            options=list(DEVICES.keys()),
-            default=["Desktop", "Mobile"],
-            help="Choose device types for testing"
-        )
-        
-        # Comparison settings
-        st.subheader("🎯 Comparison Settings")
-        similarity_threshold = st.slider(
-            "Similarity Threshold (%)",
-            min_value=50,
-            max_value=100,
-            value=95,
-            help="Minimum similarity percentage to consider images as matching"
-        )
-        
-        wait_time = st.number_input(
-            "Page Load Wait Time (seconds)",
-            min_value=1,
-            max_value=30,
-            value=3,
-            help="Time to wait for page to fully load"
-        )
+        nav = st.radio("Navigation", ["Run Tests", "Manage Test Runs"], index=0)
 
-    # Main content area
-    tab1, tab2, tab3, tab4 = st.tabs(["URL Configuration", "Test Results", "Detailed Comparison", "Manage Test Runs"])
-    
-    with tab1:
-        configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time)
-    
-    with tab2:
-        display_results_tab()
-    
-    with tab3:
-        detailed_comparison_tab()
-    
-    with tab4:
+    if nav == "Run Tests":
+        # Sidebar for configuration (only for Run Tests page)
+        with st.sidebar:
+            st.header("⚙️ Test Configuration")
+            selected_browsers = st.multiselect(
+                "Select Browsers",
+                options=list(BROWSERS.keys()),
+                default=["Chrome"],
+                help="Choose browsers for testing"
+            )
+            selected_devices = st.multiselect(
+                "Select Devices",
+                options=list(DEVICES.keys()),
+                default=["Desktop", "Mobile"],
+                help="Choose device types for testing"
+            )
+            st.subheader("🎯 Comparison Settings")
+            similarity_threshold = st.slider(
+                "Similarity Threshold (%)",
+                min_value=50,
+                max_value=100,
+                value=95,
+                help="Minimum similarity percentage to consider images as matching"
+            )
+            wait_time = st.number_input(
+                "Page Load Wait Time (seconds)",
+                min_value=1,
+                max_value=30,
+                value=3,
+                help="Time to wait for page to fully load"
+            )
+        # Tabs for the main workflow
+        tab1, tab2, tab3 = st.tabs(["URL Configuration", "Test Results", "Detailed Comparison"])
+        with tab1:
+            configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time)
+        with tab2:
+            display_results_tab()
+        with tab3:
+            detailed_comparison_tab()
+    elif nav == "Manage Test Runs":
         manage_test_runs_tab()
+
+def _load_image_from_result(record, key):
+    try:
+        # Try in-memory first
+        img = record.get(key)
+        if img is not None:
+            return img
+        # Map key to stored path key
+        path_key_map = {
+            'staging_screenshot': 'staging',
+            'production_screenshot': 'production',
+            'diff_image': 'diff'
+        }
+        spaths = record.get('screenshot_paths', {}) or {}
+        rel = spaths.get(path_key_map.get(key, ''), None)
+        if rel:
+            base = ResultManager().results_dir
+            fp = base / rel
+            if fp.exists():
+                from PIL import Image as _PILImage
+                return _PILImage.open(fp)
+    except Exception:
+        return None
+    return None
 
 def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time):
     st.header("URL Configuration")
@@ -230,10 +253,14 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     """Run visual regression tests"""
     # State already set in UI, just continue
     
-    initialize_browser_manager()
+    # Use fresh browser managers per test to avoid cross-event-loop issues
     
     # Create progress indicators
     total_tests = len(url_pairs) * len(browsers) * len(devices)
+    if total_tests == 0:
+        st.warning("No valid browser/device combinations to run.")
+        st.session_state.test_running = False
+        return
     progress_bar = st.progress(0)
     status_text = st.empty()
     
@@ -241,6 +268,15 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     start_time = datetime.now()
     timing_text = st.empty()
     current_test = 0
+    # Live metrics
+    metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
+    m_completed = metrics_col1.empty()
+    m_passed = metrics_col2.empty()
+    m_failed = metrics_col3.empty()
+    m_skipped = metrics_col4.empty()
+    passed_count = 0
+    failed_count = 0
+    skipped_count = 0
     
     # Initialize result manager
     result_manager = ResultManager()
@@ -262,7 +298,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                     
                     current_test += 1
                     progress = current_test / total_tests
-                    progress_bar.progress(progress)
+                    progress_bar.progress(int(progress * 100))
                     
                     # Show detailed status
                     elapsed = (datetime.now() - start_time).total_seconds()
@@ -276,19 +312,32 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                     status_text.text(f"Testing {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
                     
                     # Run the actual test
-                    result = asyncio.run(run_single_test(
-                        url_pair, browser, device, similarity_threshold, wait_time
-                    ))
+                    # Run the async single test in this thread
+                    result = asyncio.run(
+                        run_single_test(url_pair, browser, device, similarity_threshold, wait_time)
+                    )
                     
                     if result:
                         results.append(result)
                         result_manager.save_result(test_id, result)
+                        if result.get('is_match'):
+                            passed_count += 1
+                        else:
+                            failed_count += 1
         
+                    else:
+                        skipped_count += 1
+
+                    # Update live metrics
+                    m_completed.metric("Completed", f"{current_test}/{total_tests}")
+                    m_passed.metric("Passed", passed_count)
+                    m_failed.metric("Failed", failed_count)
+                    m_skipped.metric("Skipped", skipped_count)
         # Store results in session state
         st.session_state.test_results = results
         
         # Complete the test successfully
-        progress_bar.progress(1.0)
+        progress_bar.progress(100)
         total_time = (datetime.now() - start_time).total_seconds()
         status_text.text("🎉 All tests completed successfully!")
         timing_text.text(f"✅ Total time: {total_time:.1f}s")
@@ -299,7 +348,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
             failed = len(results) - passed
             
             st.success(f"🎉 Completed {len(results)} tests successfully in {total_time:.1f} seconds!")
-            st.success(f"📊 **Results Summary**: {passed} passed, {failed} failed | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
+            st.success(f"📊 **Results Summary**: {passed} passed, {failed} failed, {skipped_count} skipped | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
             
             # Show results immediately in expandable section
             with st.expander("📋 Quick Results Summary", expanded=True):
@@ -310,8 +359,8 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
             # Clear guidance for next steps
             st.info("💡 **Next Steps**: Switch to 'Test Results' or 'Detailed Comparison' tabs to view full results and images")
             
-            # Trigger celebration
-            st.balloons()
+            # Small completion animation
+            st.toast("🎈 Tests complete!", icon="🎉")
         else:
             st.warning("⚠️ Tests completed but no results were generated. Please check your URLs and try again.")
         
@@ -321,27 +370,26 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         # Reset test state
         st.session_state.test_running = False
         st.session_state.tests_started = False
-        # Cleanup browser manager
-        if st.session_state.browser_manager:
-            asyncio.run(st.session_state.browser_manager.cleanup())
+        # No shared browser manager to clean here
         
         # Don't clear progress indicators immediately, let user see final state
 
 async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time):
     """Run a single visual regression test"""
     try:
-        browser_manager = st.session_state.browser_manager
+        # Use a fresh BrowserManager per test to avoid cross-loop transport issues
+        browser_manager = BrowserManager()
         
         # Get viewport configuration
         viewport = VIEWPORT_CONFIGS[device]
         
         # Take screenshots
         staging_screenshot = await browser_manager.take_screenshot(
-            url_pair['staging_url'], browser, viewport, wait_time
+            url_pair['staging_url'], browser, viewport, wait_time, device_name=device
         )
         
         production_screenshot = await browser_manager.take_screenshot(
-            url_pair['production_url'], browser, viewport, wait_time
+            url_pair['production_url'], browser, viewport, wait_time, device_name=device
         )
         
         if not staging_screenshot or not production_screenshot:
@@ -358,6 +406,7 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
             'test_name': url_pair['name'],
             'browser': browser,
             'device': device,
+            'device_model': PLAYWRIGHT_DEVICE_MAP.get(device, device),
             'staging_url': url_pair['staging_url'],
             'production_url': url_pair['production_url'],
             'similarity_score': comparison_result['similarity_score'],
@@ -365,7 +414,9 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
             'staging_screenshot': staging_screenshot,
             'production_screenshot': production_screenshot,
             'diff_image': comparison_result['diff_image'],
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'viewport_width': viewport.get('width'),
+            'viewport_height': viewport.get('height')
         }
         
         return result
@@ -373,6 +424,11 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
     except Exception as e:
         st.error(f"Error in test {url_pair['name']} ({browser}, {device}): {str(e)}")
         return None
+    finally:
+        try:
+            await browser_manager.cleanup()
+        except Exception:
+            pass
 
 def display_results_tab():
     st.header("Test Results")
@@ -384,10 +440,12 @@ def display_results_tab():
     # Create results DataFrame
     results_data = []
     for result in st.session_state.test_results:
+        device_model = PLAYWRIGHT_DEVICE_MAP.get(result['device'], result['device'])
         results_data.append({
             'Test Name': result['test_name'],
             'Browser': result['browser'],
-            'Device': result['device'],
+            'Device': f"{result['device']} ({device_model})",
+            'Viewport': f"{result.get('viewport_width','?')}x{result.get('viewport_height','?')}",
             'Similarity (%)': f"{result['similarity_score']:.1f}",
             'Status': "✅ Pass" if result['is_match'] else "❌ Fail",
             'Staging URL': result['staging_url'],
@@ -416,11 +474,11 @@ def display_results_tab():
     # Filter options
     col1, col2, col3 = st.columns(3)
     with col1:
-        status_filter = st.selectbox("Filter by Status", ["All", "Pass", "Fail"])
+        status_filter = st.selectbox("Filter by Status", ["All", "Pass", "Fail"], help="Show only passing, failing, or all results")
     with col2:
-        browser_filter = st.selectbox("Filter by Browser", ["All"] + list(set(df['Browser'])))
+        browser_filter = st.selectbox("Filter by Browser", ["All"] + list(set(df['Browser'])), help="Limit results to a specific browser")
     with col3:
-        device_filter = st.selectbox("Filter by Device", ["All"] + list(set(df['Device'])))
+        device_filter = st.selectbox("Filter by Device", ["All"] + list(set(df['Device'])), help="Limit results to a specific device type")
     
     # Apply filters
     filtered_df = df.copy()
@@ -434,16 +492,14 @@ def display_results_tab():
     
     # Display results table with selection
     if len(filtered_df) > 0:
-        selected_rows = st.dataframe(
+        st.dataframe(
             filtered_df,
             width="stretch",
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row"
+            hide_index=True
         )
         
         # Export functionality
-        if st.button("Export Results"):
+        if st.button("Export Results", help="Prepare a ZIP with CSV + images for download"):
             export_results(df)
     else:
         st.info("No results match the selected filters.")
@@ -469,6 +525,40 @@ def detailed_comparison_tab():
     
     if selected_test is not None:
         result = st.session_state.test_results[selected_test]
+
+        # Top bar: URLs and Report actions (sticky)
+        st.markdown("<style>.sticky-top{position:sticky; top:0; z-index:5; background:var(--background-color,#fff); padding:8px 0; border-bottom:1px solid #eee}</style>", unsafe_allow_html=True)
+        st.markdown('<div class="sticky-top">', unsafe_allow_html=True)
+        top_left, top_right = st.columns([3, 2])
+        with top_left:
+            st.markdown("**Staging URL**")
+            st.write(f"{result.get('staging_url', 'N/A')}")
+            st.markdown("**Production URL**")
+            st.write(f"{result.get('production_url', 'N/A')}")
+        with top_right:
+            st.markdown("**Generate Report**")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Summary PDF", key="btn_pdf_summary_top"):
+                    pdf_bytes = generate_pdf(summary_only=True)
+                    st.download_button(
+                        label="Download Summary PDF",
+                        data=pdf_bytes,
+                        file_name="visual_summary.pdf",
+                        mime="application/pdf",
+                        key="dl_pdf_summary_top"
+                    )
+            with col_b:
+                if st.button("Full PDF", key="btn_pdf_full_top"):
+                    pdf_bytes = generate_pdf(summary_only=False)
+                    st.download_button(
+                        label="Download Full PDF",
+                        data=pdf_bytes,
+                        file_name="visual_full_report.pdf",
+                        mime="application/pdf",
+                        key="dl_pdf_full_top"
+                    )
+        st.markdown('</div>', unsafe_allow_html=True)
         
         # Test information
         col1, col2, col3 = st.columns(3)
@@ -477,7 +567,9 @@ def detailed_comparison_tab():
         with col2:
             st.metric("Status", "Pass" if result['is_match'] else "Fail")
         with col3:
-            st.metric("Browser/Device", f"{result['browser']} / {result['device']}")
+            device_model = PLAYWRIGHT_DEVICE_MAP.get(result['device'], result['device'])
+            vp = f"{result.get('viewport_width','?')}x{result.get('viewport_height','?')}"
+            st.metric("Browser/Device", f"{result['browser']} / {result['device']} ({device_model}) @ {vp}")
         
         # Comparison mode selection
         comparison_mode = st.radio(
@@ -486,38 +578,57 @@ def detailed_comparison_tab():
             horizontal=True
         )
         
+        # Context chips
+        chip = lambda text: f"<span style='display:inline-block;padding:2px 8px;margin-right:6px;border:1px solid #ddd;border-radius:999px;font-size:12px;'>{text}</span>"
+        device_model = PLAYWRIGHT_DEVICE_MAP.get(result['device'], result['device'])
+        vp = f"{result.get('viewport_width','?')}x{result.get('viewport_height','?')}"
+        status = 'PASS' if result['is_match'] else 'FAIL'
+        st.markdown(chip(f"Browser: {result['browser']}") + chip(f"Device: {device_model}") + chip(f"Viewport: {vp}") + chip(f"Status: {status}"), unsafe_allow_html=True)
+
         # Display images based on mode
         if comparison_mode == "Side by Side":
+            st.markdown("<style>.img-container{height:70vh; overflow:auto; border:1px solid #eee; border-radius:6px; padding:8px; width:50vw}</style>", unsafe_allow_html=True)
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Staging")
-                if 'staging_screenshot' in result and result['staging_screenshot']:
-                    st.image(result['staging_screenshot'], use_column_width=True)
+                staging_loaded = _load_image_from_result(result, 'staging_screenshot')
+                if staging_loaded is not None:
+                    img = resize_image_for_display(staging_loaded, max_width=1200, max_height=1600)
+                    # Removed invalid zero-height container; using styled div for scroll instead
+                    st.markdown('<div class="img-container">', unsafe_allow_html=True)
+                    st.image(img, use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.error("Staging screenshot not available")
                 st.caption(result.get('staging_url', 'URL not available'))
             with col2:
                 st.subheader("Production")
-                if 'production_screenshot' in result and result['production_screenshot']:
-                    st.image(result['production_screenshot'], use_column_width=True)
+                production_loaded = _load_image_from_result(result, 'production_screenshot')
+                if production_loaded is not None:
+                    img = resize_image_for_display(production_loaded, max_width=1200, max_height=1600)
+                    st.markdown('<div class="img-container">', unsafe_allow_html=True)
+                    st.image(img, use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.error("Production screenshot not available")
                 st.caption(result.get('production_url', 'URL not available'))
         
         elif comparison_mode == "Overlay":
             st.subheader("Overlay Comparison")
-            if 'staging_screenshot' in result and 'production_screenshot' in result and result['staging_screenshot'] and result['production_screenshot']:
+            staging_loaded = _load_image_from_result(result, 'staging_screenshot')
+            production_loaded = _load_image_from_result(result, 'production_screenshot')
+            if staging_loaded is not None and production_loaded is not None:
                 opacity = st.slider("Staging Opacity", 0.0, 1.0, 0.5, 0.1)
                 
                 # Create overlay image
                 try:
                     comparator = ImageComparator()
-                    overlay_image = comparator.create_overlay(
-                        result['staging_screenshot'],
-                        result['production_screenshot'],
-                        opacity
-                    )
-                    st.image(overlay_image, use_column_width=True)
+                    overlay_image = comparator.create_overlay(staging_loaded, production_loaded, opacity)
+                    # Resize overlay for viewport-friendly display and render at 50vw
+                    overlay_resized = resize_image_for_display(overlay_image, max_width=1000, max_height=700)
+                    st.markdown('<div style="width:50vw;">', unsafe_allow_html=True)
+                    st.image(overlay_resized, use_container_width=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Error creating overlay: {e}")
             else:
@@ -525,11 +636,15 @@ def detailed_comparison_tab():
         
         elif comparison_mode == "Difference Only":
             st.subheader("Visual Differences")
-            if result.get('diff_image'):
-                st.image(result['diff_image'], use_column_width=True)
+            diff_loaded = _load_image_from_result(result, 'diff_image')
+            if diff_loaded is not None:
+                img = resize_image_for_display(diff_loaded, max_width=1600, max_height=1600)
+                st.image(img)
                 st.caption("Red areas indicate differences between staging and production")
             else:
                 st.info("No differences detected or difference image not available")
+
+        # (Report buttons moved to top)
 
 def cleanup_partial_results():
     """Clean up partial test results from interrupted tests"""
@@ -578,19 +693,26 @@ def manage_test_runs_tab():
     cleanup_col1, cleanup_col2 = st.columns(2)
     
     with cleanup_col1:
-        days_to_keep = st.number_input("Keep runs from last N days", min_value=1, max_value=365, value=30)
-        if st.button("🗓️ Clean Old Runs"):
-            cleaned = result_manager.cleanup_old_results(days_to_keep)
-            st.success(f"Cleaned up {cleaned} old test runs")
-            st.rerun()
+        days_to_keep = st.number_input("Keep runs from last N days", min_value=1, max_value=365, value=30, help="Delete runs older than this many days")
+        if st.button("🗓️ Clean Old Runs", key="clean_old_runs"):
+            try:
+                cleaned = result_manager.cleanup_old_results(days_to_keep)
+                st.success(f"Cleaned up {cleaned} old test runs")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error cleaning old runs: {e}")
     
     with cleanup_col2:
-        if st.button("🗑️ Delete All Runs", type="secondary"):
-            if st.checkbox("I understand this will delete all test results"):
+        confirm_delete = st.checkbox("I understand this will delete all test results", key="confirm_delete_all")
+        if st.button("🗑️ Delete All Runs", type="secondary", key="delete_all_runs"):
+            if not confirm_delete:
+                st.warning("Please confirm deletion by checking the box above.")
+            else:
                 try:
                     shutil.rmtree(result_manager.results_dir)
                     result_manager.results_dir.mkdir(exist_ok=True)
-                    result_manager.screenshots_dir.mkdir(exist_ok=True)
+                    st.session_state.test_results = []
+                    st.session_state.current_test_id = None
                     st.success("All test runs deleted!")
                     st.rerun()
                 except Exception as e:
@@ -679,6 +801,10 @@ def manage_test_runs_tab():
                             try:
                                 for run_id in selected_runs:
                                     result_manager.delete_test_run(run_id)
+                                # Clear session if the deleted run was loaded
+                                if st.session_state.get('current_test_id') in selected_runs:
+                                    st.session_state.test_results = []
+                                    st.session_state.current_test_id = None
                                 st.success(f"🗑️ Test run {selected_runs[0]} deleted successfully")
                                 # Reset confirmation state
                                 del st.session_state[f"delete_confirm_{selected_runs[0]}"]
@@ -712,11 +838,15 @@ def export_selected_runs(run_ids, result_manager):
         
         zip_buffer.seek(0)
         
-        # Create download link
-        b64 = base64.b64encode(zip_buffer.read()).decode()
-        href = f'<a href="data:application/zip;base64,{b64}" download="selected_test_runs.zip">Download Selected Runs</a>'
-        st.markdown(href, unsafe_allow_html=True)
-        st.success("Export prepared! Click the download link above.")
+        # Provide a download button
+        data = zip_buffer.read()
+        st.download_button(
+            label="Download Selected Runs",
+            data=data,
+            file_name="selected_test_runs.zip",
+            mime="application/zip"
+        )
+        st.success("Export prepared! Use the button above to download.")
         
     except Exception as e:
         st.error(f"Error exporting runs: {e}")
@@ -738,33 +868,199 @@ def export_results(df):
                 test_folder = test_folder.replace(" ", "_").replace("/", "_")
                 
                 # Save staging screenshot
-                if result['staging_screenshot']:
+                staging_img = result.get('staging_screenshot')
+                if staging_img is not None:
                     staging_bytes = BytesIO()
-                    result['staging_screenshot'].save(staging_bytes, format='PNG')
+                    staging_img.save(staging_bytes, format='PNG')
                     zip_file.writestr(f"{test_folder}/staging.png", staging_bytes.getvalue())
+                elif result.get('screenshot_paths', {}).get('staging'):
+                    try:
+                        p = Path('test_results') / result['screenshot_paths']['staging']
+                        if p.exists():
+                            zip_file.write(p, f"{test_folder}/staging.png")
+                    except Exception:
+                        pass
                 
                 # Save production screenshot
-                if result['production_screenshot']:
+                production_img = result.get('production_screenshot')
+                if production_img is not None:
                     production_bytes = BytesIO()
-                    result['production_screenshot'].save(production_bytes, format='PNG')
+                    production_img.save(production_bytes, format='PNG')
                     zip_file.writestr(f"{test_folder}/production.png", production_bytes.getvalue())
+                elif result.get('screenshot_paths', {}).get('production'):
+                    try:
+                        p = Path('test_results') / result['screenshot_paths']['production']
+                        if p.exists():
+                            zip_file.write(p, f"{test_folder}/production.png")
+                    except Exception:
+                        pass
                 
                 # Save diff image
-                if result['diff_image']:
+                diff_img = result.get('diff_image')
+                if diff_img is not None:
                     diff_bytes = BytesIO()
-                    result['diff_image'].save(diff_bytes, format='PNG')
+                    diff_img.save(diff_bytes, format='PNG')
                     zip_file.writestr(f"{test_folder}/diff.png", diff_bytes.getvalue())
+                elif result.get('screenshot_paths', {}).get('diff'):
+                    try:
+                        p = Path('test_results') / result['screenshot_paths']['diff']
+                        if p.exists():
+                            zip_file.write(p, f"{test_folder}/diff.png")
+                    except Exception:
+                        pass
         
         zip_buffer.seek(0)
-        
-        # Create download link
-        b64 = base64.b64encode(zip_buffer.read()).decode()
-        href = f'<a href="data:application/zip;base64,{b64}" download="visual_regression_results.zip">Download Results</a>'
-        st.markdown(href, unsafe_allow_html=True)
+
+        data = zip_buffer.read()
+        st.download_button(label="Download Results (ZIP)", data=data, file_name="visual_regression_results.zip", mime="application/zip")
         st.success("Results exported successfully!")
         
     except Exception as e:
         st.error(f"Error exporting results: {str(e)}")
+
+def generate_pdf(summary_only=True):
+    try:
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+        margin = 2 * cm
+        y = height - margin
+        
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(margin, y, "Visual Regression Report")
+        y -= 1.2 * cm
+        c.setFont("Helvetica", 10)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.drawString(margin, y, f"Generated: {now}")
+        y -= 1.0 * cm
+        
+        results = st.session_state.get('test_results', [])
+        if summary_only:
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(margin, y, "Summary")
+            y -= 0.8 * cm
+            c.setFont("Helvetica", 9)
+            for r in results:
+                line = f"{r['test_name']} | {r['browser']} | {r['device']} | {r['similarity_score']:.1f}% | {'PASS' if r['is_match'] else 'FAIL'}"
+                c.drawString(margin, y, line)
+                y -= 0.6 * cm
+                if y < margin:
+                    c.showPage(); y = height - margin
+        else:
+            # Helpers
+            from PIL import Image as _PILImage
+            from pathlib import Path as _Path
+            def _load_img(record, which):
+                img = record.get(which)
+                if img is not None:
+                    return img
+                p = record.get('screenshot_paths', {}).get('staging' if which=='staging_screenshot' else 'production' if which=='production_screenshot' else 'diff')
+                if p:
+                    fp = _Path('test_results') / p
+                    try:
+                        if fp.exists():
+                            return _PILImage.open(fp)
+                    except Exception:
+                        return None
+                return None
+
+            def draw_img_jpeg(pil_img, x, y, max_w, max_h, quality=70):
+                if not pil_img:
+                    return y
+                try:
+                    img = pil_img.convert('RGB')
+                    iw, ih = img.size
+                    scale = min(max_w / iw, max_h / ih, 1.0)
+                    dw, dh = int(iw * scale), int(ih * scale)
+                    if scale < 1.0:
+                        img = img.resize((dw, dh), _PILImage.Resampling.LANCZOS)
+                    buf = BytesIO()
+                    img.save(buf, format='JPEG', quality=quality, optimize=True)
+                    buf.seek(0)
+                    ir = ImageReader(buf)
+                    c.drawImage(ir, x, y - dh, width=dw, height=dh, preserveAspectRatio=True, mask='auto')
+                    return y - dh - 0.5 * cm
+                except Exception:
+                    return y
+
+            comparator = ImageComparator()
+            for idx, r in enumerate(results, 1):
+                # New page per test for consistent pagination
+                if idx > 1:
+                    c.showPage()
+                y = height - margin
+                c.setFont("Helvetica-Bold", 12)
+                title = f"{idx}. {r['test_name']} - {r['browser']} ({r['device']})"
+                c.drawString(margin, y, title)
+                y -= 0.7 * cm
+                c.setFont("Helvetica", 9)
+                meta = f"Similarity: {r['similarity_score']:.1f}% | Status: {'PASS' if r['is_match'] else 'FAIL'}"
+                c.drawString(margin, y, meta)
+                y -= 0.5 * cm
+
+                # Load images (fallback to disk if not in memory)
+                staging_img = _load_img(r, 'staging_screenshot')
+                production_img = _load_img(r, 'production_screenshot')
+                diff_img = r.get('diff_image') or _load_img(r, 'diff_image')
+
+                # If mobile, crop extremely tall screenshots to a reasonable window
+                try:
+                    is_mobile = 'mobile' in str(r.get('device', '')).lower()
+                    if is_mobile:
+                        vp_h = r.get('viewport_height') or 0
+                        # Crop to about 2.5x viewport height or max 2400px
+                        crop_h = int(2.5 * vp_h) if vp_h else 2400
+                        def _crop_tall(img):
+                            if img is None:
+                                return None
+                            w, h = img.size
+                            if h > crop_h:
+                                return img.crop((0, 0, w, crop_h))
+                            return img
+                        staging_img = _crop_tall(staging_img)
+                        production_img = _crop_tall(production_img)
+                        diff_img = _crop_tall(diff_img)
+                except Exception:
+                    pass
+
+                # Overlay
+                overlay_img = None
+                try:
+                    if staging_img is not None and production_img is not None:
+                        overlay_img = comparator.create_overlay(staging_img, production_img, opacity=0.5)
+                except Exception:
+                    overlay_img = None
+
+                # Layout: two columns for staging/production, then overlay and diff below
+                col_gap = 0.5 * cm
+                col_w = (width - 2 * margin - col_gap) / 2
+                row_h = (height - 5 * cm) / 3
+
+                # Staging (left) and Production (right)
+                y1 = y
+                y1 = draw_img_jpeg(staging_img, margin, y1, col_w, row_h)
+                y2 = y
+                y2 = draw_img_jpeg(production_img, margin + col_w + col_gap, y2, col_w, row_h)
+                y = min(y1, y2)
+
+                # Overlay
+                y = draw_img_jpeg(overlay_img, margin, y, width - 2 * margin, row_h, quality=65)
+
+                # Diff
+                y = draw_img_jpeg(diff_img, margin, y, width - 2 * margin, row_h, quality=65)
+
+                # Guidance note
+                c.setFont("Helvetica-Oblique", 8)
+                c.drawString(margin, y, "Guidance: In overlay, verify key regions align (header, nav, CTAs, forms). In diff, red shows changes.")
+                # No manual pagination here since each test uses its own page
+        
+        c.showPage()
+        c.save()
+        buffer.seek(0)
+        return buffer.read()
+    except Exception as e:
+        st.error(f"Error generating PDF: {e}")
+        return b""
 
 if __name__ == "__main__":
     main()

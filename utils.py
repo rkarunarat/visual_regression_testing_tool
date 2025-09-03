@@ -170,7 +170,7 @@ def display_success_message(success_type, details=None):
 def create_progress_indicator(current, total, description="Processing"):
     """Create a progress indicator"""
     progress = current / total if total > 0 else 0
-    st.progress(progress, text=f"{description}... {current}/{total}")
+    st.progress(int(progress * 100), text=f"{description}... {current}/{total}")
 
 def extract_domain_from_url(url):
     """Extract domain name from URL for display"""

@@ -1,12 +1,30 @@
 import asyncio
+import sys
 from playwright.async_api import async_playwright
+from config import PLAYWRIGHT_DEVICE_MAP
 import io
 from PIL import Image
+import warnings
 import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Allow very large images from full-page screenshots and silence PIL warning
+Image.MAX_IMAGE_PIXELS = None
+try:
+    warnings.filterwarnings('ignore', category=Image.DecompressionBombWarning)
+except Exception:
+    pass
+
+# Ensure proper event loop policy on Windows for subprocess support (Playwright)
+if sys.platform.startswith("win"):
+    try:
+        # Proactor policy supports subprocesses required by Playwright
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
 
 class BrowserManager:
     def __init__(self):
@@ -79,52 +97,69 @@ class BrowserManager:
                     self.browsers[browser_name] = await browser_engine.launch(**minimal_options)
                     logger.info(f"Successfully launched {browser_name} with minimal options")
                 except Exception as e2:
-                    logger.warning(f"Minimal launch also failed for {browser_name}: {e2}")
-                    # Try multiple fallbacks
-                    if browser_name == 'Chrome':
-                        # Try Firefox first
-                        try:
-                            logger.info("Trying Firefox as fallback...")
-                            self.browsers[browser_name] = await self.playwright.firefox.launch(headless=True)
-                            logger.info("Successfully launched Firefox as Chrome fallback")
-                        except Exception as e3:
-                            logger.warning(f"Firefox fallback failed: {e3}")
-                            # Try WebKit as final fallback
-                            try:
-                                logger.info("Trying WebKit as final fallback...")
-                                self.browsers[browser_name] = await self.playwright.webkit.launch(headless=True)
-                                logger.info("Successfully launched WebKit as final fallback")
-                            except Exception as e4:
-                                logger.error(f"All browser fallbacks failed: {e4}")
-                                raise RuntimeError(f"Cannot launch any browser: Chrome failed ({e}), Firefox failed ({e3}), WebKit failed ({e4})")
-                    else:
-                        raise
+                    logger.error(f"Launch failed for {browser_name} even with minimal options: {e2}")
+                    raise
         
         return self.browsers[browser_name]
     
-    async def create_context(self, browser, viewport, user_agent=None):
-        """Create browser context with specific viewport and user agent"""
+    async def create_context(self, browser, viewport, device_name=None, user_agent=None, browser_name=None):
+        """Create browser context with specific viewport and optional device emulation"""
         context_options = {
             'viewport': viewport,
             'ignore_https_errors': True,
             'java_script_enabled': True
         }
-        
+
+        # Prefer built-in device descriptors when possible
+        if device_name and self.playwright is not None:
+            descriptor = PLAYWRIGHT_DEVICE_MAP.get(device_name)
+            if descriptor:
+                try:
+                    dopt = self.playwright.devices.get(descriptor)
+                    if dopt:
+                        # Merge descriptor but keep explicit viewport override later
+                        for k, v in dopt.items():
+                            if k not in ['viewport']:
+                                context_options[k] = v
+                except Exception:
+                    pass
+
         if user_agent:
             context_options['user_agent'] = user_agent
-        
+
+        # Firefox does not support some mobile emulation context options
+        if (browser_name or '').lower() == 'firefox':
+            for k in ['isMobile', 'is_mobile', 'hasTouch', 'has_touch', 'deviceScaleFactor', 'device_scale_factor']:
+                context_options.pop(k, None)
+        else:
+            # For desktop contexts, capture sharper screenshots by using higher DPR
+            if not device_name or 'desktop' in (device_name or '').lower():
+                context_options.setdefault('device_scale_factor', 2)
+
         return await browser.new_context(**context_options)
     
-    async def take_screenshot(self, url, browser_name, viewport, wait_time=3):
+    async def take_screenshot(self, url, browser_name, viewport, wait_time=3, device_name=None):
         """Take screenshot of a webpage"""
         context = None
         try:
             browser = await self.get_browser(browser_name)
-            context = await self.create_context(browser, viewport)
+            if not browser:
+                return None
+            context = await self.create_context(browser, viewport, device_name=device_name, browser_name=browser_name)
             page = await context.new_page()
             
             # Navigate to URL with timeout
-            await page.goto(url, wait_until='networkidle', timeout=30000)
+            try:
+                await page.goto(url, wait_until='networkidle', timeout=45000)
+            except Exception:
+                await page.goto(url, wait_until='load', timeout=45000)
+
+            # Ensure fonts and late resources are ready before capture
+            try:
+                await page.wait_for_load_state('networkidle', timeout=10000)
+                await page.evaluate("(async () => { if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch(e) {} } return true; })()")
+            except Exception:
+                pass
             
             # Additional wait time for dynamic content
             await asyncio.sleep(wait_time)
@@ -133,10 +168,7 @@ class BrowserManager:
             await self.handle_common_overlays(page)
             
             # Take full page screenshot
-            screenshot_bytes = await page.screenshot(
-                full_page=True,
-                type='png'
-            )
+            screenshot_bytes = await page.screenshot(full_page=True, type='png', scale='device')
             
             # Convert to PIL Image
             image = Image.open(io.BytesIO(screenshot_bytes))
@@ -147,7 +179,10 @@ class BrowserManager:
         except Exception as e:
             logger.error(f"Error taking screenshot of {url} with {browser_name}: {e}")
             if context is not None:
-                await context.close()
+                try:
+                    await context.close()
+                except Exception:
+                    pass
             return None
     
     async def handle_common_overlays(self, page):
@@ -217,22 +252,11 @@ class BrowserManager:
             logger.error(f"Error during cleanup: {e}")
     
     def __del__(self):
-        """Destructor to ensure cleanup"""
-        if self.browsers or self.playwright:
-            try:
-                # Create new event loop if none exists
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                if loop.is_running():
-                    # If loop is already running, schedule cleanup
-                    asyncio.create_task(self.cleanup())
-                else:
-                    # If loop is not running, run cleanup
-                    loop.run_until_complete(self.cleanup())
-                    
-            except Exception as e:
-                logger.error(f"Error in destructor cleanup: {e}")
+        """Avoid event-loop operations during interpreter shutdown."""
+        try:
+            # Best-effort: don't touch asyncio loop on teardown to prevent 'Event loop is closed' errors
+            self.browsers = {}
+            self.contexts = {}
+            self.playwright = None
+        except Exception:
+            pass

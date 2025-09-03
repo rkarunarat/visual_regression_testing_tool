@@ -12,18 +12,20 @@ class ResultManager:
     def __init__(self, results_dir="test_results"):
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
-        self.screenshots_dir = self.results_dir / "screenshots"
-        self.screenshots_dir.mkdir(exist_ok=True)
+        # Screenshots are stored inside each test run directory; no global screenshots dir needed
     
     def save_result(self, test_id: str, result: Dict[str, Any]) -> bool:
         """Save a single test result"""
         try:
-            # Create test-specific directory
+            # Create test-specific directory, with browser/device nesting
             test_dir = self.results_dir / test_id
             test_dir.mkdir(exist_ok=True)
+            browser_dir = test_dir / str(result.get('browser', 'Unknown'))
+            device_dir = browser_dir / str(result.get('device', 'Unknown'))
+            device_dir.mkdir(parents=True, exist_ok=True)
             
             # Save screenshots
-            screenshot_paths = self._save_screenshots(test_dir, result)
+            screenshot_paths = self._save_screenshots(device_dir, result)
             
             # Create result metadata (without binary data) - ensure JSON serializable
             result_metadata = {
@@ -39,7 +41,7 @@ class ResultManager:
             }
             
             # Save metadata to JSON
-            result_file = test_dir / f"{self._generate_result_filename(result)}.json"
+            result_file = device_dir / f"{self._generate_result_filename(result)}.json"
             with open(result_file, 'w') as f:
                 json.dump(result_metadata, f, indent=2)
             
@@ -50,7 +52,7 @@ class ResultManager:
             logger.error(f"Error saving result: {e}")
             return False
     
-    def _save_screenshots(self, test_dir: Path, result: Dict[str, Any]) -> Dict[str, str]:
+    def _save_screenshots(self, base_dir: Path, result: Dict[str, Any]) -> Dict[str, str]:
         """Save screenshots and return their paths"""
         screenshot_paths = {}
         
@@ -60,19 +62,19 @@ class ResultManager:
             
             # Save staging screenshot
             if result.get('staging_screenshot'):
-                staging_path = test_dir / f"{filename_base}_staging.png"
+                staging_path = base_dir / f"{filename_base}_staging.png"
                 result['staging_screenshot'].save(staging_path)
                 screenshot_paths['staging'] = str(staging_path.relative_to(self.results_dir))
             
             # Save production screenshot
             if result.get('production_screenshot'):
-                production_path = test_dir / f"{filename_base}_production.png"
+                production_path = base_dir / f"{filename_base}_production.png"
                 result['production_screenshot'].save(production_path)
                 screenshot_paths['production'] = str(production_path.relative_to(self.results_dir))
             
             # Save diff image if available
             if result.get('diff_image'):
-                diff_path = test_dir / f"{filename_base}_diff.png"
+                diff_path = base_dir / f"{filename_base}_diff.png"
                 result['diff_image'].save(diff_path)
                 screenshot_paths['diff'] = str(diff_path.relative_to(self.results_dir))
             
@@ -100,7 +102,7 @@ class ResultManager:
                 return []
             
             results = []
-            for json_file in test_dir.glob("*.json"):
+            for json_file in test_dir.rglob("*.json"):
                 try:
                     with open(json_file, 'r') as f:
                         result = json.load(f)
@@ -120,9 +122,9 @@ class ResultManager:
             test_runs = []
             
             for test_dir in self.results_dir.iterdir():
-                if test_dir.is_dir() and test_dir.name != "screenshots":
-                    # Count results in this test run
-                    result_count = len(list(test_dir.glob("*.json")))
+                if test_dir.is_dir():
+                    # Count results in this test run (recursive)
+                    result_count = len(list(test_dir.rglob("*.json")))
                     
                     if result_count > 0:
                         # Get the most recent result timestamp

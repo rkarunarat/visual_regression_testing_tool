@@ -1,0 +1,8 @@
+streamlit>=1.49.1
+playwright>=1.55.0
+pillow>=11.3.0
+numpy>=2.3.2
+opencv-python>=4.11.0.86
+scikit-image>=0.25.2
+pandas>=2.3.2
+reportlab>=4.1.0

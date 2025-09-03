@@ -57,6 +57,14 @@ DEVICES = {
     }
 }
 
+# Playwright device descriptors mapping for our device names
+PLAYWRIGHT_DEVICE_MAP = {
+    'Mobile': 'iPhone 14 Pro',
+    'Mobile Android': 'Pixel 7',
+    'Tablet': 'iPad Pro 11',
+    'Tablet Android': 'Galaxy Tab S7'
+}
+
 # Viewport configurations
 VIEWPORT_CONFIGS = {
     'Desktop': {'width': 1920, 'height': 1080},
