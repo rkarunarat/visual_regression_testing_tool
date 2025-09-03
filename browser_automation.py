@@ -39,10 +39,21 @@ class BrowserManager:
             
             browser_engine = browser_map[browser_name]
             
-            # Browser launch options
+            # Browser launch options - optimized for Replit environment
             launch_options = {
                 'headless': True,
-                'args': ['--no-sandbox', '--disable-dev-shm-usage']
+                'args': [
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-features=VizDisplayCompositor',
+                    '--disable-extensions',
+                    '--disable-plugins',
+                    '--no-first-run',
+                    '--disable-background-timer-throttling',
+                    '--disable-renderer-backgrounding',
+                    '--disable-backgrounding-occluded-windows'
+                ]
             }
             
             # Special handling for Edge
