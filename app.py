@@ -168,6 +168,10 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     total_tests = len(url_pairs) * len(browsers) * len(devices)
     progress_bar = st.progress(0)
     status_text = st.empty()
+    
+    # Add timing info
+    start_time = datetime.now()
+    timing_text = st.empty()
     current_test = 0
     
     # Initialize result manager
@@ -185,7 +189,14 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                     current_test += 1
                     progress = current_test / total_tests
                     progress_bar.progress(progress)
-                    status_text.text(f"Testing {url_pair['name']} on {browser} ({device})...")
+                    
+                    # Show detailed status
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    avg_time = elapsed / current_test if current_test > 0 else 0
+                    remaining = (total_tests - current_test) * avg_time
+                    
+                    status_text.text(f"Testing {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
+                    timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s | Est. remaining: {remaining:.1f}s")
                     
                     # Run the actual test
                     result = asyncio.run(run_single_test(
@@ -200,8 +211,16 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         st.session_state.test_results = results
         
         progress_bar.progress(1.0)
+        total_time = (datetime.now() - start_time).total_seconds()
         status_text.text("Tests completed!")
-        st.success(f"Completed {len(results)} tests successfully!")
+        timing_text.text(f"✅ Total time: {total_time:.1f}s")
+        st.success(f"Completed {len(results)} tests successfully in {total_time:.1f} seconds!")
+        
+        # Show quick summary
+        if results:
+            passed = sum(1 for r in results if r['is_match'])
+            failed = len(results) - passed
+            st.info(f"📊 Results: {passed} passed, {failed} failed | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
         
     except Exception as e:
         st.error(f"Error during testing: {str(e)}")
