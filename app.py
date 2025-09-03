@@ -294,6 +294,12 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
             passed = sum(1 for r in results if r['is_match'])
             failed = len(results) - passed
             st.success(f"📊 Results: {passed} passed, {failed} failed | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
+            
+            # Show results immediately in expandable section
+            with st.expander("📋 Quick Results Summary", expanded=True):
+                for i, result in enumerate(results, 1):
+                    status = "✅ Pass" if result['is_match'] else "❌ Fail"
+                    st.write(f"**Test {i}**: {result['test_name']} - {result['browser']} ({result['device']}) - {status} - {result['similarity_score']:.1f}%")
         
         # Trigger rerun to show results in other tabs
         st.balloons()
@@ -303,11 +309,15 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     finally:
         # Reset test state
         st.session_state.test_running = False
+        st.session_state.tests_started = False
         # Cleanup browser manager
         if st.session_state.browser_manager:
             asyncio.run(st.session_state.browser_manager.cleanup())
         
-        # Results will be visible in other tabs on next interaction
+        # Clear progress indicators
+        progress_bar.empty()
+        status_text.empty()
+        timing_text.empty()
 
 async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time):
     """Run a single visual regression test"""
