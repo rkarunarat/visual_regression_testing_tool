@@ -53,11 +53,12 @@ class BrowserManager:
                     '--disable-background-timer-throttling',
                     '--disable-renderer-backgrounding',
                     '--disable-backgrounding-occluded-windows',
-                    '--single-process',
                     '--disable-software-rasterizer',
                     '--disable-background-networking',
                     '--disable-default-apps',
-                    '--disable-sync'
+                    '--disable-sync',
+                    '--disable-ipc-flooding-protection',
+                    '--disable-xvfb'
                 ]
             }
             
@@ -69,11 +70,27 @@ class BrowserManager:
                 self.browsers[browser_name] = await browser_engine.launch(**launch_options)
             except Exception as e:
                 logger.warning(f"Could not launch {browser_name}: {e}")
-                # Fallback to Chromium if the specific browser fails
-                if browser_name != 'Chrome':
-                    self.browsers[browser_name] = await self.playwright.chromium.launch(headless=True)
-                else:
-                    raise
+                # Try with minimal flags first
+                minimal_options = {
+                    'headless': True,
+                    'args': ['--no-sandbox', '--disable-dev-shm-usage']
+                }
+                try:
+                    self.browsers[browser_name] = await browser_engine.launch(**minimal_options)
+                    logger.info(f"Successfully launched {browser_name} with minimal options")
+                except Exception as e2:
+                    logger.warning(f"Minimal launch also failed for {browser_name}: {e2}")
+                    # Final fallback: try to use Firefox if Chrome fails
+                    if browser_name == 'Chrome':
+                        try:
+                            logger.info("Trying Firefox as fallback...")
+                            self.browsers[browser_name] = await self.playwright.firefox.launch(headless=True)
+                            logger.info("Successfully launched Firefox as Chrome fallback")
+                        except Exception as e3:
+                            logger.error(f"All browser launch attempts failed: {e3}")
+                            raise RuntimeError(f"Cannot launch any browser: Chrome failed ({e}), Firefox fallback failed ({e3})")
+                    else:
+                        raise
         
         return self.browsers[browser_name]
     
