@@ -188,8 +188,10 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
                 st.error("Please select at least one device")
                 return
             
+            # Set test running state immediately for UI
             st.session_state.stop_testing = False
-            run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time)
+            st.session_state.test_running = True
+            st.rerun()  # Refresh to show stop button
     
     with col2:
         if st.session_state.test_running:
@@ -198,8 +200,13 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
                 st.session_state.cleanup_needed = True
                 st.warning("⚠️ Stopping tests...")
     
-    # Show current status
-    if st.session_state.test_running:
+    # Show current status and run tests if needed
+    if st.session_state.test_running and not st.session_state.get('tests_started', False):
+        st.session_state.tests_started = True
+        st.info("⏳ Starting visual regression tests...")
+        run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time)
+        st.session_state.tests_started = False
+    elif st.session_state.test_running:
         st.info("⏳ Test is currently running...")
     
     # Cleanup dialog
@@ -220,8 +227,7 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
 
 def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     """Run visual regression tests"""
-    # Set test running state
-    st.session_state.test_running = True
+    # State already set in UI, just continue
     
     initialize_browser_manager()
     
@@ -301,9 +307,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         if st.session_state.browser_manager:
             asyncio.run(st.session_state.browser_manager.cleanup())
         
-        # Force app refresh to show updated results
-        if not st.session_state.stop_testing:
-            st.rerun()
+        # Results will be visible in other tabs on next interaction
 
 async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time):
     """Run a single visual regression test"""
