@@ -386,7 +386,7 @@ def display_results_tab():
     if len(filtered_df) > 0:
         selected_rows = st.dataframe(
             filtered_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row"
@@ -556,7 +556,7 @@ def manage_test_runs_tab():
         # Display dataframe
         st.dataframe(
             df.drop('Actions', axis=1),
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
         

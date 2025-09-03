@@ -1,8 +1,0 @@
-{
-  "test_name": "Test 1",
-  "browser": "Chrome",
-  "device": "Desktop",
-  "staging_url": "https://qa.careeranchorsonline.com/",
-  "production_url": "https://www.careeranchorsonline.com/",
-  "similarity_score": 99.7838652049498,
-  "is_match": 
