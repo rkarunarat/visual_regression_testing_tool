@@ -483,33 +483,45 @@ def detailed_comparison_tab():
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Staging")
-                st.image(result['staging_screenshot'], use_column_width=True)
-                st.caption(result['staging_url'])
+                if 'staging_screenshot' in result and result['staging_screenshot']:
+                    st.image(result['staging_screenshot'], use_column_width=True)
+                else:
+                    st.error("Staging screenshot not available")
+                st.caption(result.get('staging_url', 'URL not available'))
             with col2:
                 st.subheader("Production")
-                st.image(result['production_screenshot'], use_column_width=True)
-                st.caption(result['production_url'])
+                if 'production_screenshot' in result and result['production_screenshot']:
+                    st.image(result['production_screenshot'], use_column_width=True)
+                else:
+                    st.error("Production screenshot not available")
+                st.caption(result.get('production_url', 'URL not available'))
         
         elif comparison_mode == "Overlay":
             st.subheader("Overlay Comparison")
-            opacity = st.slider("Staging Opacity", 0.0, 1.0, 0.5, 0.1)
-            
-            # Create overlay image
-            comparator = ImageComparator()
-            overlay_image = comparator.create_overlay(
-                result['staging_screenshot'],
-                result['production_screenshot'],
-                opacity
-            )
-            st.image(overlay_image, use_column_width=True)
+            if 'staging_screenshot' in result and 'production_screenshot' in result and result['staging_screenshot'] and result['production_screenshot']:
+                opacity = st.slider("Staging Opacity", 0.0, 1.0, 0.5, 0.1)
+                
+                # Create overlay image
+                try:
+                    comparator = ImageComparator()
+                    overlay_image = comparator.create_overlay(
+                        result['staging_screenshot'],
+                        result['production_screenshot'],
+                        opacity
+                    )
+                    st.image(overlay_image, use_column_width=True)
+                except Exception as e:
+                    st.error(f"Error creating overlay: {e}")
+            else:
+                st.error("Both staging and production screenshots are required for overlay comparison")
         
         elif comparison_mode == "Difference Only":
             st.subheader("Visual Differences")
-            if result['diff_image']:
+            if result.get('diff_image'):
                 st.image(result['diff_image'], use_column_width=True)
                 st.caption("Red areas indicate differences between staging and production")
             else:
-                st.info("No differences detected")
+                st.info("No differences detected or difference image not available")
 
 def cleanup_partial_results():
     """Clean up partial test results from interrupted tests"""
@@ -617,28 +629,59 @@ def manage_test_runs_tab():
             
             with action_col1:
                 if st.button("📊 Load Results"):
-                    # Load results from selected run
-                    all_results = []
-                    for run_id in selected_runs:
-                        results = result_manager.load_test_results(run_id)
-                        for result in results:
-                            # Add run_id for context
-                            result['run_id'] = run_id
-                            all_results.append(result)
-                    st.session_state.test_results = all_results
-                    st.success(f"Loaded {len(all_results)} results from test run")
+                    try:
+                        # Load results from selected run
+                        all_results = []
+                        for run_id in selected_runs:
+                            results = result_manager.load_test_results(run_id)
+                            for result in results:
+                                # Add run_id for context
+                                result['run_id'] = run_id
+                                all_results.append(result)
+                        
+                        if all_results:
+                            st.session_state.test_results = all_results
+                            st.session_state.current_test_id = selected_runs[0]  # Set for current context
+                            st.success(f"✅ Loaded {len(all_results)} results from test run {selected_runs[0]}")
+                            st.info("🔄 Switch to 'Test Results' or 'Detailed Comparison' tabs to view the loaded data")
+                        else:
+                            st.warning("No results found in selected test run")
+                    except Exception as e:
+                        st.error(f"Error loading results: {e}")
             
             with action_col2:
                 if st.button("📥 Export Run"):
                     export_selected_runs(selected_runs, result_manager)
             
             with action_col3:
-                if st.button("🗑️ Delete Run", type="secondary"):
-                    if st.checkbox("Confirm deletion of this test run"):
-                        for run_id in selected_runs:
-                            result_manager.delete_test_run(run_id)
-                        st.success("Test run deleted")
+                # Use session state to track delete confirmation
+                if f"delete_confirm_{selected_runs[0]}" not in st.session_state:
+                    st.session_state[f"delete_confirm_{selected_runs[0]}"] = False
+                
+                if not st.session_state[f"delete_confirm_{selected_runs[0]}"]:
+                    if st.button("🗑️ Delete Run", type="secondary"):
+                        st.session_state[f"delete_confirm_{selected_runs[0]}"] = True
                         st.rerun()
+                else:
+                    st.warning(f"⚠️ Really delete test run: {selected_runs[0]}?")
+                    col_confirm, col_cancel = st.columns(2)
+                    
+                    with col_confirm:
+                        if st.button("✅ Yes, Delete", type="primary"):
+                            try:
+                                for run_id in selected_runs:
+                                    result_manager.delete_test_run(run_id)
+                                st.success(f"🗑️ Test run {selected_runs[0]} deleted successfully")
+                                # Reset confirmation state
+                                del st.session_state[f"delete_confirm_{selected_runs[0]}"]
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error deleting test run: {e}")
+                    
+                    with col_cancel:
+                        if st.button("❌ Cancel"):
+                            st.session_state[f"delete_confirm_{selected_runs[0]}"] = False
+                            st.rerun()
         else:
             st.info("No test runs available for selection")
 
