@@ -41,6 +41,12 @@ if 'test_running' not in st.session_state:
     st.session_state.test_running = False
 if 'cleanup_needed' not in st.session_state:
     st.session_state.cleanup_needed = False
+if 'nav' not in st.session_state:
+    st.session_state.nav = "Run Tests"
+if 'banner_message' not in st.session_state:
+    st.session_state.banner_message = None
+if 'banner_type' not in st.session_state:
+    st.session_state.banner_type = "info"
 
 def initialize_browser_manager():
     """Initialize browser manager if not already done"""
@@ -67,9 +73,22 @@ def main():
     st.title("🔍 Visual Regression Testing Tool")
     st.markdown("Professional visual comparison across multiple browsers and devices")
 
+    # Global banner (one-shot)
+    if st.session_state.banner_message:
+        if st.session_state.banner_type == "success":
+            st.success(st.session_state.banner_message)
+        elif st.session_state.banner_type == "warning":
+            st.warning(st.session_state.banner_message)
+        elif st.session_state.banner_type == "error":
+            st.error(st.session_state.banner_message)
+        else:
+            st.info(st.session_state.banner_message)
+        # Clear after display
+        st.session_state.banner_message = None
+
     # Sidebar navigation
     with st.sidebar:
-        nav = st.radio("Navigation", ["Run Tests", "Manage Test Runs"], index=0)
+        nav = st.radio("Navigation", ["Run Tests", "Manage Test Runs"], index=0, key="nav")
 
     if nav == "Run Tests":
         # Sidebar for configuration (only for Run Tests page)
@@ -242,12 +261,31 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
             if st.button("🗑️ Clean Up Partial Results"):
                 cleanup_partial_results()
                 st.session_state.cleanup_needed = False
-                st.success("Partial results cleaned up!")
+                st.session_state.nav = "Run Tests"
+                st.session_state.banner_message = "🗑️ Partial results cleared. You can start a new test."
+                st.session_state.banner_type = "success"
+                st.rerun()
         
         with cleanup_col2:
             if st.button("💾 Keep Partial Results"):
-                st.session_state.cleanup_needed = False
-                st.info("Partial results preserved.")
+                # Load partial results from disk for current test id
+                try:
+                    result_manager = ResultManager()
+                    if st.session_state.current_test_id:
+                        loaded = result_manager.load_test_results(st.session_state.current_test_id)
+                        st.session_state.test_results = loaded
+                        st.session_state.banner_message = f"💾 Loaded {len(loaded)} results from {st.session_state.current_test_id}. Review them in Test Results/Detailed Comparison."
+                        st.session_state.banner_type = "success"
+                    else:
+                        st.session_state.banner_message = "No current test run found to load."
+                        st.session_state.banner_type = "warning"
+                except Exception as e:
+                    st.session_state.banner_message = f"Error loading partial results: {e}"
+                    st.session_state.banner_type = "error"
+                finally:
+                    st.session_state.cleanup_needed = False
+                    st.session_state.nav = "Run Tests"
+                    st.rerun()
 
 def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     """Run visual regression tests"""
