@@ -109,8 +109,13 @@ class ImageComparator:
             gray1 = img1_np
             gray2 = img2_np
         
-        # Structural Similarity Index
-        ssim_score = ssim(gray1, gray2, data_range=gray1.max() - gray1.min())
+        # Structural Similarity Index with safe data_range handling
+        data_range = float(gray1.max() - gray1.min())
+        if data_range <= 0:
+            # If both images are constant, SSIM is 1.0 when equal, else 0.0
+            ssim_score = 1.0 if np.array_equal(gray1, gray2) else 0.0
+        else:
+            ssim_score = ssim(gray1, gray2, data_range=data_range)
         
         # Pixel-wise similarity
         pixel_diff = np.abs(img1_np.astype(float) - img2_np.astype(float))

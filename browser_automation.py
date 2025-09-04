@@ -105,24 +105,24 @@ class BrowserManager:
     async def create_context(self, browser, viewport, device_name=None, user_agent=None, browser_name=None):
         """Create browser context with specific viewport and optional device emulation"""
         context_options = {
-            'viewport': viewport,
             'ignore_https_errors': True,
             'java_script_enabled': True
         }
 
         # Prefer built-in device descriptors when possible
+        used_descriptor = False
         if device_name and self.playwright is not None:
-            descriptor = PLAYWRIGHT_DEVICE_MAP.get(device_name)
-            if descriptor:
+            descriptor_name = PLAYWRIGHT_DEVICE_MAP.get(device_name)
+            if descriptor_name:
                 try:
-                    dopt = self.playwright.devices.get(descriptor)
+                    dopt = self.playwright.devices.get(descriptor_name)
                     if dopt:
-                        # Merge descriptor but keep explicit viewport override later
+                        # Merge full descriptor, including viewport
                         for k, v in dopt.items():
-                            if k not in ['viewport']:
-                                context_options[k] = v
+                            context_options[k] = v
+                        used_descriptor = True
                 except Exception:
-                    pass
+                    used_descriptor = False
 
         if user_agent:
             context_options['user_agent'] = user_agent
@@ -133,13 +133,17 @@ class BrowserManager:
                 context_options.pop(k, None)
         else:
             # For desktop contexts, capture sharper screenshots by using higher DPR
-            if not device_name or 'desktop' in (device_name or '').lower():
+            if (not device_name or 'desktop' in (device_name or '').lower()) and not used_descriptor:
                 context_options.setdefault('device_scale_factor', 2)
+
+        # If no descriptor (e.g., Desktop), set explicit viewport from config
+        if not used_descriptor and viewport:
+            context_options['viewport'] = viewport
 
         return await browser.new_context(**context_options)
     
-    async def take_screenshot(self, url, browser_name, viewport, wait_time=3, device_name=None):
-        """Take screenshot of a webpage"""
+    async def take_screenshot(self, url, browser_name, viewport, wait_time=3, device_name=None, return_metrics=False):
+        """Take screenshot of a webpage. If return_metrics=True, returns (image, metrics)."""
         context = None
         try:
             browser = await self.get_browser(browser_name)
@@ -167,13 +171,22 @@ class BrowserManager:
             # Remove any modal dialogs or cookie banners (common issue)
             await self.handle_common_overlays(page)
             
+            # Capture runtime viewport metrics
+            metrics = None
+            try:
+                metrics = await page.evaluate("() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio, userAgent: navigator.userAgent, screen: { width: window.screen.width, height: window.screen.height } })")
+            except Exception:
+                metrics = None
+
             # Take full page screenshot
-            screenshot_bytes = await page.screenshot(full_page=True, type='png', scale='device')
+            screenshot_bytes = await page.screenshot(full_page=True, type='png')
             
             # Convert to PIL Image
             image = Image.open(io.BytesIO(screenshot_bytes))
             
             await context.close()
+            if return_metrics:
+                return image, (metrics or {})
             return image
             
         except Exception as e:

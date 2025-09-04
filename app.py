@@ -12,7 +12,7 @@ from browser_manager import BrowserManager
 from image_comparator import ImageComparator
 from results_store import ResultManager
 from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP
-from utils import create_download_link, resize_image_for_display
+from utils import create_download_link, resize_image_for_display, sanitize_filename
 from pathlib import Path
 import shutil
 from reportlab.lib.pagesizes import A4
@@ -384,13 +384,16 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
         viewport = VIEWPORT_CONFIGS[device]
         
         # Take screenshots
-        staging_screenshot = await browser_manager.take_screenshot(
-            url_pair['staging_url'], browser, viewport, wait_time, device_name=device
+        staging_capture = await browser_manager.take_screenshot(
+            url_pair['staging_url'], browser, viewport, wait_time, device_name=device, return_metrics=True
         )
-        
-        production_screenshot = await browser_manager.take_screenshot(
-            url_pair['production_url'], browser, viewport, wait_time, device_name=device
+        production_capture = await browser_manager.take_screenshot(
+            url_pair['production_url'], browser, viewport, wait_time, device_name=device, return_metrics=True
         )
+
+        # Unpack images and metrics
+        staging_screenshot, staging_metrics = staging_capture if isinstance(staging_capture, tuple) else (staging_capture, {})
+        production_screenshot, production_metrics = production_capture if isinstance(production_capture, tuple) else (production_capture, {})
         
         if not staging_screenshot or not production_screenshot:
             return None
@@ -416,7 +419,9 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
             'diff_image': comparison_result['diff_image'],
             'timestamp': datetime.now().isoformat(),
             'viewport_width': viewport.get('width'),
-            'viewport_height': viewport.get('height')
+            'viewport_height': viewport.get('height'),
+            'staging_runtime_metrics': staging_metrics,
+            'production_runtime_metrics': production_metrics
         }
         
         return result
@@ -494,7 +499,7 @@ def display_results_tab():
     if len(filtered_df) > 0:
         st.dataframe(
             filtered_df,
-            width="stretch",
+            use_container_width=True,
             hide_index=True
         )
         
@@ -544,7 +549,7 @@ def detailed_comparison_tab():
                     st.download_button(
                         label="Download Summary PDF",
                         data=pdf_bytes,
-                        file_name="visual_summary.pdf",
+                        file_name=build_pdf_filename(summary_only=True),
                         mime="application/pdf",
                         key="dl_pdf_summary_top"
                     )
@@ -554,7 +559,7 @@ def detailed_comparison_tab():
                     st.download_button(
                         label="Download Full PDF",
                         data=pdf_bytes,
-                        file_name="visual_full_report.pdf",
+                        file_name=build_pdf_filename(summary_only=False),
                         mime="application/pdf",
                         key="dl_pdf_full_top"
                     )
@@ -567,9 +572,13 @@ def detailed_comparison_tab():
         with col2:
             st.metric("Status", "Pass" if result['is_match'] else "Fail")
         with col3:
-            device_model = PLAYWRIGHT_DEVICE_MAP.get(result['device'], result['device'])
+            device = result['device']
+            device_model = PLAYWRIGHT_DEVICE_MAP.get(device)
+            device_display = f"{device} ({device_model})" if device_model and device_model != device else device
             vp = f"{result.get('viewport_width','?')}x{result.get('viewport_height','?')}"
-            st.metric("Browser/Device", f"{result['browser']} / {result['device']} ({device_model}) @ {vp}")
+            st.markdown("<style>.wrap-val{font-size:22px; font-weight:600; line-height:1.25; word-break:break-word;}</style>", unsafe_allow_html=True)
+            st.caption("Browser / Device")
+            st.markdown(f"<div class='wrap-val'>{result['browser']} / {device_display} @ {vp}</div>", unsafe_allow_html=True)
         
         # Comparison mode selection
         comparison_mode = st.radio(
@@ -578,40 +587,52 @@ def detailed_comparison_tab():
             horizontal=True
         )
         
-        # Context chips
+        # Context chips, including runtime viewport metrics
         chip = lambda text: f"<span style='display:inline-block;padding:2px 8px;margin-right:6px;border:1px solid #ddd;border-radius:999px;font-size:12px;'>{text}</span>"
         device_model = PLAYWRIGHT_DEVICE_MAP.get(result['device'], result['device'])
-        vp = f"{result.get('viewport_width','?')}x{result.get('viewport_height','?')}"
+        vp_cfg = f"{result.get('viewport_width','?')}x{result.get('viewport_height','?')}"
+        # Prefer runtime metrics if available (from production capture)
+        rt = result.get('production_runtime_metrics') or result.get('staging_runtime_metrics') or {}
+        vp_rt = f"{rt.get('innerWidth','?')}x{rt.get('innerHeight','?')}@{rt.get('devicePixelRatio','?')}" if rt else "-"
         status = 'PASS' if result['is_match'] else 'FAIL'
-        st.markdown(chip(f"Browser: {result['browser']}") + chip(f"Device: {device_model}") + chip(f"Viewport: {vp}") + chip(f"Status: {status}"), unsafe_allow_html=True)
+        st.markdown(
+            chip(f"Browser: {result['browser']}") +
+            chip(f"Device: {device_model}") +
+            chip(f"Viewport cfg: {vp_cfg}") +
+            chip(f"Viewport rt: {vp_rt}") +
+            chip(f"Status: {status}"),
+            unsafe_allow_html=True
+        )
 
         # Display images based on mode
         if comparison_mode == "Side by Side":
-            st.markdown("<style>.img-container{height:70vh; overflow:auto; border:1px solid #eee; border-radius:6px; padding:8px; width:50vw}</style>", unsafe_allow_html=True)
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("Staging")
-                staging_loaded = _load_image_from_result(result, 'staging_screenshot')
-                if staging_loaded is not None:
+            st.markdown("<style>[data-testid='stImage']{max-height:70vh; overflow:auto; border:1px solid #eee; border-radius:6px; padding:8px;}</style>", unsafe_allow_html=True)
+            staging_loaded = _load_image_from_result(result, 'staging_screenshot')
+            production_loaded = _load_image_from_result(result, 'production_screenshot')
+
+            if staging_loaded is None and production_loaded is None:
+                st.info("No screenshots available for this test.")
+            elif staging_loaded is not None and production_loaded is not None:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Staging")
                     img = resize_image_for_display(staging_loaded, max_width=1200, max_height=1600)
-                    # Removed invalid zero-height container; using styled div for scroll instead
-                    st.markdown('<div class="img-container">', unsafe_allow_html=True)
                     st.image(img, use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                else:
-                    st.error("Staging screenshot not available")
-                st.caption(result.get('staging_url', 'URL not available'))
-            with col2:
-                st.subheader("Production")
-                production_loaded = _load_image_from_result(result, 'production_screenshot')
-                if production_loaded is not None:
+                    st.caption(result.get('staging_url', 'URL not available'))
+                with col2:
+                    st.subheader("Production")
                     img = resize_image_for_display(production_loaded, max_width=1200, max_height=1600)
-                    st.markdown('<div class="img-container">', unsafe_allow_html=True)
                     st.image(img, use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                else:
-                    st.error("Production screenshot not available")
-                st.caption(result.get('production_url', 'URL not available'))
+                    st.caption(result.get('production_url', 'URL not available'))
+            else:
+                # Adaptive single column when only one image is available
+                available_label = "Staging" if staging_loaded is not None else "Production"
+                available_url = result.get('staging_url') if staging_loaded is not None else result.get('production_url')
+                available_img = staging_loaded if staging_loaded is not None else production_loaded
+                st.subheader(available_label)
+                img = resize_image_for_display(available_img, max_width=1400, max_height=1600)
+                st.image(img, use_container_width=True)
+                st.caption(available_url or 'URL not available')
         
         elif comparison_mode == "Overlay":
             st.subheader("Overlay Comparison")
@@ -619,27 +640,35 @@ def detailed_comparison_tab():
             production_loaded = _load_image_from_result(result, 'production_screenshot')
             if staging_loaded is not None and production_loaded is not None:
                 opacity = st.slider("Staging Opacity", 0.0, 1.0, 0.5, 0.1)
-                
-                # Create overlay image
-                try:
-                    comparator = ImageComparator()
-                    overlay_image = comparator.create_overlay(staging_loaded, production_loaded, opacity)
-                    # Resize overlay for viewport-friendly display and render at 50vw
-                    overlay_resized = resize_image_for_display(overlay_image, max_width=1000, max_height=700)
-                    st.markdown('<div style="width:50vw;">', unsafe_allow_html=True)
-                    st.image(overlay_resized, use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"Error creating overlay: {e}")
+                with st.spinner("Generating overlay..."):
+                    try:
+                        comparator = ImageComparator()
+                        overlay_image = comparator.create_overlay(staging_loaded, production_loaded, opacity)
+                        overlay_resized = resize_image_for_display(overlay_image, max_width=1400, max_height=900)
+                        st.image(overlay_resized, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error creating overlay: {e}")
             else:
                 st.error("Both staging and production screenshots are required for overlay comparison")
         
         elif comparison_mode == "Difference Only":
             st.subheader("Visual Differences")
             diff_loaded = _load_image_from_result(result, 'diff_image')
+            if diff_loaded is None:
+                # Attempt to compute diff on the fly if both images exist
+                staging_loaded = _load_image_from_result(result, 'staging_screenshot')
+                production_loaded = _load_image_from_result(result, 'production_screenshot')
+                if staging_loaded is not None and production_loaded is not None:
+                    with st.spinner("Computing visual diff..."):
+                        try:
+                            comparator = ImageComparator()
+                            diff_loaded = comparator.create_difference_image(staging_loaded, production_loaded)
+                        except Exception as e:
+                            st.error(f"Error generating difference image: {e}")
+                            diff_loaded = None
             if diff_loaded is not None:
                 img = resize_image_for_display(diff_loaded, max_width=1600, max_height=1600)
-                st.image(img)
+                st.image(img, use_container_width=True)
                 st.caption("Red areas indicate differences between staging and production")
             else:
                 st.info("No differences detected or difference image not available")
@@ -740,7 +769,7 @@ def manage_test_runs_tab():
         # Display dataframe
         st.dataframe(
             df.drop('Actions', axis=1),
-            width="stretch",
+            use_container_width=True,
             hide_index=True
         )
         
@@ -918,6 +947,18 @@ def export_results(df):
     except Exception as e:
         st.error(f"Error exporting results: {str(e)}")
 
+def build_pdf_filename(summary_only=True):
+    results = st.session_state.get('test_results', [])
+    total = len(results)
+    passed = sum(1 for r in results if r.get('is_match'))
+    failed = total - passed
+    pass_rate = (passed / total * 100) if total > 0 else 0
+    test_id = st.session_state.get('current_test_id') or 'run'
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    kind = 'summary' if summary_only else 'full'
+    base = f"VisualDiff_{test_id}_{total}tests_{passed}pass_{failed}fail_{pass_rate:.0f}pr_{ts}_{kind}.pdf"
+    return sanitize_filename(base)
+
 def generate_pdf(summary_only=True):
     try:
         buffer = BytesIO()
@@ -932,20 +973,71 @@ def generate_pdf(summary_only=True):
         c.setFont("Helvetica", 10)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         c.drawString(margin, y, f"Generated: {now}")
-        y -= 1.0 * cm
-        
+        y -= 0.7 * cm
+
+        # Cover page: engineering summary
         results = st.session_state.get('test_results', [])
+        total = len(results)
+        passed = sum(1 for r in results if r.get('is_match'))
+        failed = total - passed
+        pass_rate = (passed / total * 100) if total > 0 else 0
+        avg_similarity = (sum(r.get('similarity_score', 0) for r in results) / total) if total > 0 else 0
+        browsers = sorted({r.get('browser', 'Unknown') for r in results})
+        devices = sorted({r.get('device', 'Unknown') for r in results})
+        run_id = st.session_state.get('current_test_id') or 'N/A'
+
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(margin, y, "Executive Summary")
+        y -= 0.8 * cm
+
+        c.setFont("Helvetica", 10)
+        def draw_kv(label, value):
+            nonlocal y
+            c.drawString(margin, y, f"{label}:")
+            c.drawString(margin + 4.5 * cm, y, str(value))
+            y -= 0.6 * cm
+
+        draw_kv("Run ID", run_id)
+        draw_kv("Total Tests", total)
+        draw_kv("Passed", passed)
+        draw_kv("Failed", failed)
+        draw_kv("Pass Rate", f"{pass_rate:.1f}%")
+        draw_kv("Average Similarity", f"{avg_similarity:.1f}%")
+        draw_kv("Browsers", ", ".join(browsers) if browsers else "-")
+        draw_kv("Devices", ", ".join(devices) if devices else "-")
+
+        # Separator
+        y -= 0.2 * cm
+        c.line(margin, y, width - margin, y)
+        y -= 0.6 * cm
+
+        # Optional quick table of tests on the cover if space allows
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(margin, y, "Tests (name | browser | device | score | status)")
+        y -= 0.7 * cm
+        c.setFont("Helvetica", 9)
+        for r in results:
+            line = f"{r['test_name']} | {r['browser']} | {r['device']} | {r['similarity_score']:.1f}% | {'PASS' if r['is_match'] else 'FAIL'}"
+            c.drawString(margin, y, line[:170])
+            y -= 0.55 * cm
+            if y < margin + 1.5 * cm:
+                c.showPage(); y = height - margin; c.setFont("Helvetica", 9)
+
+        # Start next section on a new page
+        c.showPage()
+
         if summary_only:
-            c.setFont("Helvetica-Bold", 11)
-            c.drawString(margin, y, "Summary")
-            y -= 0.8 * cm
+            y = height - margin
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(margin, y, "Summary Details")
+            y -= 0.9 * cm
             c.setFont("Helvetica", 9)
             for r in results:
                 line = f"{r['test_name']} | {r['browser']} | {r['device']} | {r['similarity_score']:.1f}% | {'PASS' if r['is_match'] else 'FAIL'}"
-                c.drawString(margin, y, line)
-                y -= 0.6 * cm
-                if y < margin:
-                    c.showPage(); y = height - margin
+                c.drawString(margin, y, line[:170])
+                y -= 0.55 * cm
+                if y < margin + 1.0 * cm:
+                    c.showPage(); y = height - margin; c.setFont("Helvetica", 9)
         else:
             # Helpers
             from PIL import Image as _PILImage
@@ -1054,7 +1146,6 @@ def generate_pdf(summary_only=True):
                 c.drawString(margin, y, "Guidance: In overlay, verify key regions align (header, nav, CTAs, forms). In diff, red shows changes.")
                 # No manual pagination here since each test uses its own page
         
-        c.showPage()
         c.save()
         buffer.seek(0)
         return buffer.read()
