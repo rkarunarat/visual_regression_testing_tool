@@ -1,0 +1,27 @@
+[Unit]
+Description=Visual Regression Testing Tool
+After=network.target
+
+[Service]
+Type=simple
+User=streamlit
+Group=streamlit
+WorkingDirectory=/opt/visual-regression-testing
+Environment=PATH=/opt/visual-regression-testing/venv/bin
+ExecStart=/opt/visual-regression-testing/venv/bin/streamlit run app.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+Restart=always
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/visual-regression-testing/test_results /opt/visual-regression-testing/logs
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

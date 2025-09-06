@@ -10,6 +10,7 @@ A Streamlit-based visual regression tool that screenshots pairs of URLs across b
 - Detailed Comparison UI: side-by-side, overlay with opacity, diff
 - Results management: list, load, export ZIP, delete/cleanup
 - Reports: Summary PDF (table) and Full PDF (SxP, overlay, diff per test)
+- **Production Ready**: Docker, systemd service, nginx reverse proxy, SSL support
 
 ## Dependencies
 
@@ -24,6 +25,8 @@ These reflect `requirements.txt`.
 ![scikit-image](https://img.shields.io/badge/scikit--image-0.25%2B-F7931E)
 ![pandas](https://img.shields.io/badge/pandas-2.3%2B-150458?logo=pandas&logoColor=white)
 ![ReportLab](https://img.shields.io/badge/ReportLab-4.1%2B-6aa84f)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
+![Deployment](https://img.shields.io/badge/Deployment-Production%20Ready-28a745)
 
 Alternative stacks sometimes used elsewhere: Selenium, WebDriver Manager, ImageHash (not used here).
 
@@ -79,37 +82,49 @@ VisualDiff/
 - Results are stored under `test_results/<test_id>/<browser>/<device>/` with JSON + PNGs.
 - Use Manage Test Runs to load, export, or delete runs.
 
-## Production deployment
+## 🚀 Production Deployment
 
-### Single host
+For production deployment on your own server, we provide comprehensive deployment options:
 
+### 📖 [Complete Deployment Guide](README-DEPLOYMENT.md)
+
+**Quick Start Options:**
+
+#### 🐳 Docker Deployment (Recommended)
+```bash
+# One-command deployment
+./deploy.sh local
+
+# With nginx reverse proxy
+./deploy.sh production
 ```
+
+#### 🖥️ Native Server Installation
+```bash
+# Automated installation on Ubuntu/Debian
+sudo ./install.sh
+```
+
+#### ☁️ Cloud Providers
+- **AWS EC2**: Launch instance → Run install script
+- **DigitalOcean**: Create droplet → Run install script
+- **Google Cloud**: Create VM → Run install script
+
+### Key Features
+- ✅ **Production Ready**: Nginx reverse proxy, SSL support, security headers
+- ✅ **Auto-Restart**: Systemd service with automatic restarts
+- ✅ **Health Checks**: Built-in monitoring and health endpoints
+- ✅ **Security**: Non-root user, restricted permissions, firewall configs
+- ✅ **Monitoring**: Comprehensive logging and status checks
+- ✅ **Backup Ready**: Easy backup scripts for test results
+
+### Simple Manual Deployment
+```bash
+# Basic production run
 streamlit run app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
 ```
 
-Put nginx in front and proxy to 127.0.0.1:8501.
-
-### systemd service (Linux)
-
-Create a venv, install deps, then a unit file:
-
-```
-[Unit]
-Description=VisualDiff
-After=network.target
-
-[Service]
-WorkingDirectory=/srv/visualdiff
-ExecStart=/srv/visualdiff/.venv/bin/streamlit run /srv/visualdiff/app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Docker (example)
-
-Use python:3.11-slim, install requirements and `playwright install chromium`, expose 8501.
+For detailed instructions, security configurations, and troubleshooting, see the [Complete Deployment Guide](README-DEPLOYMENT.md).
 
 ## Troubleshooting
 
