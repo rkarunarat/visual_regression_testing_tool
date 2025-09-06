@@ -30,18 +30,32 @@ Alternative stacks sometimes used elsewhere: Selenium, WebDriver Manager, ImageH
 ## Quick start
 
 - Python 3.11+
-- Install dependencies and Playwright browsers:
+- Create and activate a virtual environment (recommended):
 
+Windows (PowerShell):
+```
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+macOS/Linux:
+```
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+- Install dependencies and Playwright browsers:
 ```
 pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
 - Run locally:
-
 ```
 streamlit run app.py
 ```
+
+- Deactivate the venv when done: `deactivate`
 
 ## Folder structure
 

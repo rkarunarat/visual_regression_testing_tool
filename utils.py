@@ -1,3 +1,8 @@
+"""Utility helpers for the Streamlit UI and general operations.
+
+Includes URL validation, filename sanitization, image conversion and
+resizing helpers, formatting utilities, and standardized UI messages.
+"""
 import base64
 import io
 import re

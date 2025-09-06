@@ -1,3 +1,9 @@
+"""Result storage and retrieval for visual regression test runs.
+
+This module provides `ResultManager`, which persists per-test metadata and
+associated screenshots to a filesystem structure under `test_results/`.
+It also offers utilities to list runs, compute summaries, and perform cleanup.
+"""
 import json
 import os
 from datetime import datetime
@@ -9,6 +15,12 @@ from typing import Dict, List, Any
 logger = logging.getLogger(__name__)
 
 class ResultManager:
+    """Manage persistence of test results and screenshots on disk.
+
+    Directory layout per run: `test_results/<test_id>/<browser>/<device>/`.
+    Stores JSON metadata and PNG images; exposes helpers to save, load, list,
+    summarize, delete, and clean up old runs.
+    """
     def __init__(self, results_dir="test_results"):
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)

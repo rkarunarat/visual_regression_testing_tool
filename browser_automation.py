@@ -1,3 +1,8 @@
+"""Async Playwright automation for capturing screenshots across browsers/devices.
+
+Provides `BrowserManager` to manage Playwright lifecycle, create contexts with
+device emulation, capture full-page screenshots, and handle common overlays.
+"""
 import asyncio
 import sys
 from playwright.async_api import async_playwright
@@ -27,18 +32,19 @@ if sys.platform.startswith("win"):
         pass
 
 class BrowserManager:
+    """Manage Playwright, browsers/contexts, and screenshot capture."""
     def __init__(self):
         self.playwright = None
         self.browsers = {}
         self.contexts = {}
     
     async def initialize(self):
-        """Initialize Playwright and browsers"""
+        """Start Playwright if not already started."""
         if self.playwright is None:
             self.playwright = await async_playwright().start()
     
     async def get_browser(self, browser_name):
-        """Get or create browser instance"""
+        """Get or launch a browser engine by friendly name (Chrome, Firefox...)."""
         await self.initialize()
         
         if browser_name not in self.browsers:
@@ -103,7 +109,7 @@ class BrowserManager:
         return self.browsers[browser_name]
     
     async def create_context(self, browser, viewport, device_name=None, user_agent=None, browser_name=None):
-        """Create browser context with specific viewport and optional device emulation"""
+        """Create a browser context with viewport and optional device emulation."""
         context_options = {
             'ignore_https_errors': True,
             'java_script_enabled': True
@@ -143,7 +149,7 @@ class BrowserManager:
         return await browser.new_context(**context_options)
     
     async def take_screenshot(self, url, browser_name, viewport, wait_time=3, device_name=None, return_metrics=False):
-        """Take screenshot of a webpage. If return_metrics=True, returns (image, metrics)."""
+        """Take a full-page screenshot and optionally return runtime metrics."""
         context = None
         try:
             browser = await self.get_browser(browser_name)
@@ -199,7 +205,7 @@ class BrowserManager:
             return None
     
     async def handle_common_overlays(self, page):
-        """Handle common overlays like cookie banners, modals, etc."""
+        """Attempt to dismiss or hide common overlays to reduce visual noise."""
         try:
             # Common selectors for cookie banners and overlays
             overlay_selectors = [
@@ -242,7 +248,7 @@ class BrowserManager:
             pass
     
     async def cleanup(self):
-        """Clean up browser resources"""
+        """Close contexts/browsers and stop Playwright if started."""
         try:
             # Close all contexts
             for context in self.contexts.values():

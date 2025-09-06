@@ -1,3 +1,9 @@
+"""Image comparison engine for computing similarity and visual diffs.
+
+Defines `ImageComparator`, which compares two PIL Images using multiple
+metrics (SSIM, pixel similarity, histogram correlation) and can generate
+overlay and difference images for analysis.
+"""
 import numpy as np
 from PIL import Image, ImageDraw, ImageChops
 import cv2
@@ -8,20 +14,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 class ImageComparator:
+    """Compare images and produce similarity scores and visual artifacts."""
     def __init__(self):
         self.default_threshold = 95.0
     
     def compare_images(self, image1, image2, threshold=None):
-        """
-        Compare two PIL Images and return comparison results
-        
+        """Compare two PIL Images and return similarity and optional diff.
+
         Args:
             image1: PIL Image (staging)
             image2: PIL Image (production)
             threshold: Similarity threshold percentage (default: 95.0)
-        
+
         Returns:
-            dict: Comparison results with similarity score, match status, and diff image
+            dict: similarity_score (0-100), is_match, diff_image (optional), detailed_scores
         """
         if threshold is None:
             threshold = self.default_threshold
@@ -71,7 +77,7 @@ class ImageComparator:
             }
     
     def resize_images_to_match(self, image1, image2):
-        """Resize images to have the same dimensions"""
+        """Pad images to a shared canvas size to avoid lossy resampling."""
         # Get dimensions
         w1, h1 = image1.size
         w2, h2 = image2.size
@@ -96,7 +102,7 @@ class ImageComparator:
         return image1, image2
     
     def calculate_similarity_metrics(self, img1_np, img2_np):
-        """Calculate various similarity metrics"""
+        """Calculate SSIM, pixel similarity, and histogram correlation."""
         # Ensure images are the same shape
         if img1_np.shape != img2_np.shape:
             raise ValueError("Images must have the same dimensions")
@@ -131,7 +137,7 @@ class ImageComparator:
         }
     
     def calculate_histogram_similarity(self, img1_np, img2_np):
-        """Calculate histogram similarity between two images"""
+        """Calculate per-channel histogram correlation and average the result."""
         try:
             # Calculate histograms for each channel
             if len(img1_np.shape) == 3:
@@ -156,7 +162,7 @@ class ImageComparator:
             return 0.0
     
     def create_difference_image(self, image1, image2):
-        """Create an image highlighting the differences between two images"""
+        """Create a red-highlighted image emphasizing changed regions."""
         try:
             # Ensure images are the same size
             image1, image2 = self.resize_images_to_match(image1, image2)
@@ -196,7 +202,7 @@ class ImageComparator:
             return None
     
     def create_overlay(self, image1, image2, opacity=0.5):
-        """Create an overlay image with adjustable opacity"""
+        """Create an alpha-blended overlay of the two images."""
         try:
             # Ensure images are the same size
             image1, image2 = self.resize_images_to_match(image1, image2)
@@ -223,7 +229,7 @@ class ImageComparator:
             return image1  # Return original image as fallback
     
     def get_image_info(self, image):
-        """Get basic information about an image"""
+        """Return basic image metadata for diagnostics and display."""
         return {
             'width': image.width,
             'height': image.height,
@@ -233,7 +239,7 @@ class ImageComparator:
         }
     
     def preprocess_image(self, image):
-        """Preprocess image for better comparison"""
+        """Normalize input (ensure RGB, optional blur) prior to comparison."""
         # Convert to RGB if needed
         if image.mode != 'RGB':
             image = image.convert('RGB')

@@ -1,3 +1,9 @@
+"""Streamlit UI for the Visual Regression Testing Tool.
+
+Provides tabs for configuring URL pairs, running tests, viewing results,
+performing detailed comparisons, exporting artifacts, and managing past runs.
+Relies on `BrowserManager`, `ImageComparator`, and `ResultManager`.
+"""
 import streamlit as st
 import pandas as pd
 import asyncio
@@ -49,11 +55,12 @@ if 'banner_type' not in st.session_state:
     st.session_state.banner_type = "info"
 
 def initialize_browser_manager():
-    """Initialize browser manager if not already done"""
+    """Initialize browser manager if not already present in session state."""
     if st.session_state.browser_manager is None:
         st.session_state.browser_manager = BrowserManager()
 
 def main():
+    """Render the Streamlit app and orchestrate navigation and actions."""
     # Simple dark theme with subtle green accents
     st.markdown("""
     <style>
@@ -88,7 +95,7 @@ def main():
 
     # Sidebar navigation
     with st.sidebar:
-        nav = st.radio("Navigation", ["Run Tests", "Manage Test Runs"], index=0, key="nav")
+        nav = st.radio("Navigation", ["Run Tests", "Manage Test Runs", "About"], index=0, key="nav")
 
     if nav == "Run Tests":
         # Sidebar for configuration (only for Run Tests page)
@@ -131,6 +138,15 @@ def main():
             detailed_comparison_tab()
     elif nav == "Manage Test Runs":
         manage_test_runs_tab()
+    elif nav == "About":
+        about_tab()
+    
+    # Footer credit
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='text-align:center; opacity:0.8; font-size:13px;'>Made with ❤️ by Roshan Karunarathna</div>",
+        unsafe_allow_html=True
+    )
 
 def _load_image_from_result(record, key):
     try:
@@ -157,6 +173,7 @@ def _load_image_from_result(record, key):
     return None
 
 def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time):
+    """Collect URL pairs and handle kicking off a test run."""
     st.header("URL Configuration")
     
     # URL input method selection
@@ -288,7 +305,7 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
                     st.rerun()
 
 def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
-    """Run visual regression tests"""
+    """Execute the selected test matrix and persist results incrementally."""
     # State already set in UI, just continue
     
     # Use fresh browser managers per test to avoid cross-event-loop issues
@@ -413,7 +430,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         # Don't clear progress indicators immediately, let user see final state
 
 async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time):
-    """Run a single visual regression test"""
+    """Run one test case and return a result record with images/metrics."""
     try:
         # Use a fresh BrowserManager per test to avoid cross-loop transport issues
         browser_manager = BrowserManager()
@@ -474,6 +491,7 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
             pass
 
 def display_results_tab():
+    """Show aggregate metrics and a filterable table of results."""
     st.header("Test Results")
     
     if not st.session_state.test_results:
@@ -548,6 +566,7 @@ def display_results_tab():
         st.info("No results match the selected filters.")
 
 def detailed_comparison_tab():
+    """Provide side-by-side, overlay, and diff visualizations per test."""
     st.header("Detailed Comparison")
     
     if not st.session_state.test_results:
@@ -714,7 +733,7 @@ def detailed_comparison_tab():
         # (Report buttons moved to top)
 
 def cleanup_partial_results():
-    """Clean up partial test results from interrupted tests"""
+    """Remove partially saved run directories and reset session state."""
     try:
         result_manager = ResultManager()
         if st.session_state.current_test_id:
@@ -725,7 +744,7 @@ def cleanup_partial_results():
         st.error(f"Error cleaning up partial results: {e}")
 
 def manage_test_runs_tab():
-    """Tab for managing old test runs and storage"""
+    """List runs, load/export/delete them, and clean up storage."""
     st.header("📁 Manage Test Runs")
     
     result_manager = ResultManager()
@@ -887,7 +906,7 @@ def manage_test_runs_tab():
             st.info("No test runs available for selection")
 
 def export_selected_runs(run_ids, result_manager):
-    """Export selected test runs as ZIP"""
+    """Write selected `test_results/<run_id>` trees into a single ZIP file."""
     try:
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -919,7 +938,7 @@ def export_selected_runs(run_ids, result_manager):
         st.error(f"Error exporting runs: {e}")
 
 def export_results(df):
-    """Export test results as CSV and images as ZIP"""
+    """Export current results as CSV plus associated screenshots into ZIP."""
     try:
         # Create ZIP file with results
         zip_buffer = BytesIO()
@@ -1191,5 +1210,19 @@ def generate_pdf(summary_only=True):
         st.error(f"Error generating PDF: {e}")
         return b""
 
+def about_tab():
+    """Render the README.md content as an About page with nice formatting."""
+    st.header("About This App")
+    try:
+        readme_path = Path(__file__).parent / "README.md"
+        if not readme_path.exists():
+            # Fallback to project root if running differently
+            readme_path = Path("README.md")
+        content = readme_path.read_text(encoding="utf-8")
+        # Render markdown; allow HTML used by badges to pass through as images/links
+        st.markdown(content, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Could not load README.md: {e}")
+        
 if __name__ == "__main__":
     main()
