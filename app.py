@@ -356,7 +356,6 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
             if st.button("🗑️ Clean Up Partial Results"):
                 cleanup_partial_results()
                 st.session_state.cleanup_needed = False
-                st.session_state.nav = "Run Tests"
                 st.session_state.banner_message = "🗑️ Partial results cleared. You can start a new test."
                 st.session_state.banner_type = "success"
                 st.rerun()
@@ -379,7 +378,6 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
                     st.session_state.banner_type = "error"
                 finally:
                     st.session_state.cleanup_needed = False
-                    st.session_state.nav = "Run Tests"
                     st.rerun()
 
 def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):

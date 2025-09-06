@@ -30,6 +30,24 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+print_info() {
+    echo -e "${YELLOW}[INFO]${NC} $1"
+}
+
+# Run tests before deployment
+print_status "Running functionality tests..."
+if [ -f "test_functionality.py" ]; then
+    if python test_functionality.py > /dev/null 2>&1; then
+        print_status "✅ All tests passed"
+    else
+        print_error "❌ Tests failed. Please fix issues before deploying."
+        print_info "Run 'python test_functionality.py' to see detailed test results."
+        exit 1
+    fi
+else
+    print_warning "⚠️ test_functionality.py not found, skipping tests"
+fi
+
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
     print_error "Docker is not installed. Please install Docker first."

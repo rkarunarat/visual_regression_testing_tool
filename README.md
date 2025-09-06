@@ -30,6 +30,32 @@ These reflect `requirements.txt`.
 
 Alternative stacks sometimes used elsewhere: Selenium, WebDriver Manager, ImageHash (not used here).
 
+## 🧪 Testing
+
+Before deploying or pushing changes, run the comprehensive test suite:
+
+```bash
+# Run all functionality tests
+python test_functionality.py
+
+# Or use the test runner scripts
+./run_tests.sh        # Linux/macOS
+run_tests.bat         # Windows
+```
+
+The test suite verifies:
+- ✅ All imports and dependencies
+- ✅ Configuration data integrity
+- ✅ Utility functions
+- ✅ Class instantiation
+- ✅ App syntax and structure
+- ✅ Session state handling
+- ✅ Cleanup and partial results functionality
+- ✅ Playwright setup
+- ✅ PDF generation fallbacks
+- ✅ Deployment files
+- ✅ Requirements file
+
 ## Quick start
 
 - Python 3.11+
