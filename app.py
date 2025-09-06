@@ -14,18 +14,33 @@ from io import BytesIO
 from pathlib import Path
 import zipfile
 import subprocess
-
-from browser_manager import BrowserManager
-from image_comparator import ImageComparator
-from results_store import ResultManager
-from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP
-from utils import create_download_link, resize_image_for_display, sanitize_filename
-from pathlib import Path
 import shutil
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
-from reportlab.lib.utils import ImageReader
+
+# Graceful imports with fallbacks
+try:
+    from browser_manager import BrowserManager
+    from image_comparator import ImageComparator
+    from results_store import ResultManager
+    from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP
+    from utils import create_download_link, resize_image_for_display, sanitize_filename
+    IMPORTS_OK = True
+except ImportError as e:
+    st.error(f"⚠️ Import error: {e}")
+    IMPORTS_OK = False
+    # Fallback minimal configs
+    BROWSERS = {'Chrome': {}}
+    DEVICES = {'Desktop': {}}
+    VIEWPORT_CONFIGS = {'Desktop': {'width': 1920, 'height': 1080}}
+    PLAYWRIGHT_DEVICE_MAP = {}
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import cm
+    from reportlab.lib.utils import ImageReader
+    PDF_OK = True
+except ImportError:
+    PDF_OK = False
 
 # Page configuration
 st.set_page_config(
@@ -59,28 +74,47 @@ if 'banner_type' not in st.session_state:
 def _ensure_playwright_browsers_installed():
     """On Streamlit Cloud, ensure Playwright browsers are installed.
 
-    Runs once per session to avoid repeated downloads.
+    Runs once per session to avoid repeated downloads. Skips if browsers
+    are already present in the default Playwright cache directory.
     """
     try:
         if st.session_state.get("_pw_browsers_ready"):
-            return
-        # Check whether chromium executable is available by attempting a lightweight command
-        result = subprocess.run(
-            ["python", "-m", "playwright", "install", "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        # Attempt to install required browsers (chromium, firefox, webkit)
-        subprocess.run(
-            ["python", "-m", "playwright", "install", "chromium", "firefox", "webkit"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+            return True
+        
+        # Only attempt installation if imports are OK
+        if not IMPORTS_OK:
+            st.session_state["_pw_browsers_ready"] = False
+            return False
+            
+        # Check if browsers are already present
+        cache_root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or (Path.home() / ".cache/ms-playwright"))
+        present = []
+        if cache_root.exists():
+            for name in ("chromium", "firefox", "webkit"):
+                if any(cache_root.glob(f"{name}-*")):
+                    present.append(name)
+        
+        # Install only if none of the standard engines are present
+        if not present:
+            with st.spinner("Installing Playwright browsers (first run only)..."):
+                result = subprocess.run(
+                    ["python", "-m", "playwright", "install", "chromium"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=300  # 5 minute timeout
+                )
+                if result.returncode != 0:
+                    st.warning("⚠️ Playwright browser installation may have failed. Some features may not work.")
+                    st.session_state["_pw_browsers_ready"] = False
+                    return False
+        
         st.session_state["_pw_browsers_ready"] = True
-    except Exception:
-        # Silently continue; actual launch will report errors if missing
+        return True
+    except Exception as e:
+        st.warning(f"⚠️ Browser setup issue: {e}")
         st.session_state["_pw_browsers_ready"] = False
+        return False
 
 
 def initialize_browser_manager():
@@ -91,8 +125,12 @@ def initialize_browser_manager():
 
 def main():
     """Render the Streamlit app and orchestrate navigation and actions."""
-    # Ensure required Playwright browsers are present on first run
-    _ensure_playwright_browsers_installed()
+    # Check if core dependencies are available
+    if not IMPORTS_OK:
+        st.error("❌ **Dependency Error**: Some required modules failed to import.")
+        st.info("This usually happens during the first deployment. Please wait a moment and refresh the page.")
+        st.stop()
+    
     # Simple dark theme with subtle green accents
     st.markdown("""
     <style>
@@ -207,6 +245,14 @@ def _load_image_from_result(record, key):
 def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time):
     """Collect URL pairs and handle kicking off a test run."""
     st.header("URL Configuration")
+    
+    # Check if Playwright browsers are ready before allowing tests
+    if not st.session_state.get("_pw_browsers_ready"):
+        if st.button("🔧 Setup Browsers", type="primary"):
+            _ensure_playwright_browsers_installed()
+            st.rerun()
+        st.info("⚠️ Browsers need to be set up before running tests. Click the button above.")
+        return
     
     # URL input method selection
     input_method = st.radio(
@@ -633,7 +679,7 @@ def detailed_comparison_tab():
             st.markdown("**Generate Report**")
             col_a, col_b = st.columns(2)
             with col_a:
-                if st.button("Summary PDF", key="btn_pdf_summary_top"):
+                if PDF_OK and st.button("Summary PDF", key="btn_pdf_summary_top"):
                     pdf_bytes = generate_pdf(summary_only=True)
                     st.download_button(
                         label="Download Summary PDF",
@@ -642,8 +688,10 @@ def detailed_comparison_tab():
                         mime="application/pdf",
                         key="dl_pdf_summary_top"
                     )
+                elif not PDF_OK:
+                    st.button("Summary PDF (Unavailable)", disabled=True, key="btn_pdf_summary_top_disabled")
             with col_b:
-                if st.button("Full PDF", key="btn_pdf_full_top"):
+                if PDF_OK and st.button("Full PDF", key="btn_pdf_full_top"):
                     pdf_bytes = generate_pdf(summary_only=False)
                     st.download_button(
                         label="Download Full PDF",
@@ -652,6 +700,8 @@ def detailed_comparison_tab():
                         mime="application/pdf",
                         key="dl_pdf_full_top"
                     )
+                elif not PDF_OK:
+                    st.button("Full PDF (Unavailable)", disabled=True, key="btn_pdf_full_top_disabled")
         st.markdown('</div>', unsafe_allow_html=True)
         
         # Test information
@@ -1049,6 +1099,9 @@ def build_pdf_filename(summary_only=True):
     return sanitize_filename(base)
 
 def generate_pdf(summary_only=True):
+    if not PDF_OK:
+        st.error("PDF generation is not available due to missing dependencies.")
+        return b""
     try:
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
