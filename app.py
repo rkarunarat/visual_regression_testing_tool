@@ -13,6 +13,7 @@ import base64
 from io import BytesIO
 from pathlib import Path
 import zipfile
+import subprocess
 
 from browser_manager import BrowserManager
 from image_comparator import ImageComparator
@@ -54,13 +55,44 @@ if 'banner_message' not in st.session_state:
 if 'banner_type' not in st.session_state:
     st.session_state.banner_type = "info"
 
+
+def _ensure_playwright_browsers_installed():
+    """On Streamlit Cloud, ensure Playwright browsers are installed.
+
+    Runs once per session to avoid repeated downloads.
+    """
+    try:
+        if st.session_state.get("_pw_browsers_ready"):
+            return
+        # Check whether chromium executable is available by attempting a lightweight command
+        result = subprocess.run(
+            ["python", "-m", "playwright", "install", "--help"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        # Attempt to install required browsers (chromium, firefox, webkit)
+        subprocess.run(
+            ["python", "-m", "playwright", "install", "chromium", "firefox", "webkit"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        st.session_state["_pw_browsers_ready"] = True
+    except Exception:
+        # Silently continue; actual launch will report errors if missing
+        st.session_state["_pw_browsers_ready"] = False
+
+
 def initialize_browser_manager():
     """Initialize browser manager if not already present in session state."""
     if st.session_state.browser_manager is None:
         st.session_state.browser_manager = BrowserManager()
 
+
 def main():
     """Render the Streamlit app and orchestrate navigation and actions."""
+    # Ensure required Playwright browsers are present on first run
+    _ensure_playwright_browsers_installed()
     # Simple dark theme with subtle green accents
     st.markdown("""
     <style>
