@@ -44,15 +44,56 @@ fi
 PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 print_status "Python version: $PYTHON_VERSION"
 
-if ! python3 -c 'import sys; exit(0 if sys.version_info >= (3, 11) else 1)'; then
-    print_warning "Python 3.11+ is recommended. Current version: $PYTHON_VERSION"
-    print_info "Some features may not work correctly with older versions."
+# Check if Python version is compatible
+if ! python3 -c 'import sys; exit(0 if sys.version_info >= (3, 8) else 1)'; then
+    print_error "Python 3.8+ is required. Current version: $PYTHON_VERSION"
+    print_info "Please upgrade Python or use a different version."
+    exit 1
 fi
+
+print_info "Python $PYTHON_VERSION detected - using venv for isolation"
 
 # Check if pip is installed
 if ! command -v pip3 &> /dev/null; then
     print_error "pip3 is not installed. Please install pip first."
     exit 1
+fi
+
+# Install python3-venv package if needed
+print_status "Checking for python3-venv package..."
+if ! python3 -c "import venv" 2>/dev/null; then
+    print_warning "python3-venv package not found. Installing..."
+    
+    if command -v apt-get &> /dev/null; then
+        # Ubuntu/Debian
+        print_info "Installing python3-venv on Ubuntu/Debian..."
+        sudo apt update
+        sudo apt install -y python3-venv
+    elif command -v yum &> /dev/null; then
+        # CentOS/RHEL
+        print_info "Installing python3-venv on CentOS/RHEL..."
+        sudo yum install -y python3-venv
+    elif command -v dnf &> /dev/null; then
+        # Fedora
+        print_info "Installing python3-venv on Fedora..."
+        sudo dnf install -y python3-venv
+    elif command -v pacman &> /dev/null; then
+        # Arch Linux
+        print_info "Installing python3-venv on Arch Linux..."
+        sudo pacman -S python-venv
+    elif command -v brew &> /dev/null; then
+        # macOS
+        print_info "Installing python3-venv on macOS..."
+        brew install python3-venv
+    else
+        print_error "Could not detect package manager. Please install python3-venv manually."
+        print_info "Ubuntu/Debian: sudo apt install python3-venv"
+        print_info "CentOS/RHEL: sudo yum install python3-venv"
+        print_info "Fedora: sudo dnf install python3-venv"
+        print_info "Arch: sudo pacman -S python-venv"
+        exit 1
+    fi
+    print_status "python3-venv package installed successfully!"
 fi
 
 # Create virtual environment
@@ -76,6 +117,7 @@ pip install --upgrade pip
 # Install requirements
 print_status "Installing Python dependencies..."
 pip install -r requirements.txt
+print_status "Dependencies installed successfully!"
 
 # Install Playwright browsers
 print_status "Installing Playwright browsers..."
@@ -113,8 +155,9 @@ mkdir -p logs
 print_status "Setting up environment..."
 if [ ! -f ".env" ]; then
     if [ -f "env.example" ]; then
-        cp env.example .env
-        print_status "Created .env file from template"
+        # Convert Windows line endings to Unix line endings
+        tr -d '\r' < env.example > .env
+        print_status "Created .env file from template (converted line endings)"
     else
         echo "STREAMLIT_SERVER_PORT=8501" > .env
         echo "STREAMLIT_SERVER_ADDRESS=0.0.0.0" >> .env

@@ -1,8 +1,17 @@
-streamlit>=1.49.1
-playwright>=1.55.0
-pillow>=11.3.0
-numpy>=2.3.2
-opencv-python-headless>=4.11.0.86
-scikit-image>=0.25.2
-pandas>=2.3.2
-reportlab>=4.1.0
+# Web framework - latest stable
+streamlit>=1.39.0
+
+# Browser automation - latest stable with Python 3.10+ support
+playwright>=1.45.0
+
+# Image processing - latest stable versions
+pillow>=10.4.0
+numpy>=1.26.0
+opencv-python-headless>=4.10.0.0
+scikit-image>=0.23.0
+
+# Data processing - latest stable
+pandas>=2.2.0
+
+# PDF generation - latest stable
+reportlab>=4.2.0

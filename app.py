@@ -18,6 +18,15 @@ import shutil
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import platform
+import logging
+
+# Configure logging for server console output
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Graceful imports with fallbacks
 try:
@@ -199,7 +208,7 @@ def main():
                 min_value=1,
                 max_value=30,
                 value=3,
-                help="Time to wait for page to fully load"
+                help="Time to wait for page to fully load (recommended: 3s for slower sites)"
             )
         # Tabs for the main workflow
         tab1, tab2, tab3 = st.tabs(["URL Configuration", "Test Results", "Detailed Comparison"])
@@ -329,6 +338,14 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
                 st.error("Please select at least one device")
                 return
             
+            # Log to server console
+            logger.info("🚀 Starting visual regression tests...")
+            logger.info(f"📋 Configuration: {len(url_pairs)} URLs, {len(selected_browsers)} browsers, {len(selected_devices)} devices")
+            logger.info(f"🔧 Settings: {similarity_threshold}% threshold, {wait_time}s wait time")
+            
+            # Show immediate feedback
+            st.info("🚀 **Starting tests...** Initializing browsers and preparing test environment...")
+            
             # Set test running state immediately for UI
             st.session_state.stop_testing = False
             st.session_state.test_running = True
@@ -395,8 +412,16 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         st.warning("No valid browser/device combinations to run.")
         st.session_state.test_running = False
         return
+    
+    # Log test start
+    logger.info(f"✅ Test configuration validated! Starting execution of {total_tests} tests...")
+    
+    # Show initial status
+    st.success("✅ **Test configuration validated!** Starting execution...")
+    
     progress_bar = st.progress(0)
     status_text = st.empty()
+    status_text.text("🔧 **Initializing...** Setting up browsers and test environment...")
     
     # Add timing info
     start_time = datetime.now()
@@ -426,10 +451,36 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         worker_count = get_optimal_worker_count()
         
         if use_parallel and total_tests > 1:
-            status_text.text(f"🚀 Using parallel processing with {worker_count} workers...")
-            wsl_info = " (WSL + Windows Browsers)" if is_wsl_environment() else ""
-            rancher_info = " + Rancher Desktop" if is_rancher_desktop() else ""
-            st.info(f"⚡ **Parallel Processing Enabled**: Running tests with {worker_count} workers for faster execution{wsl_info}{rancher_info}")
+            logger.info(f"🚀 Starting parallel execution with {worker_count} workers...")
+            status_text.text("🚀 **Starting parallel execution...** Launching multiple browser instances...")
+            
+            # Show appropriate environment info
+            env_info = ""
+            if is_wsl_environment():
+                env_info = " (WSL Environment)"
+            elif is_rancher_desktop():
+                env_info = " (Docker Environment)"
+            elif platform.system() == "Windows":
+                # Check if running in Docker on Windows
+                if os.path.exists('C:\\.dockerenv') or os.environ.get('CONTAINER'):
+                    env_info = " (Docker on Windows)"
+                else:
+                    env_info = " (Windows Local)"
+            elif platform.system() == "Linux":
+                if os.path.exists('/.dockerenv') or os.environ.get('CONTAINER'):
+                    env_info = " (Docker on Linux)"
+                else:
+                    env_info = " (Linux Local)"
+            elif platform.system() == "Darwin":
+                if os.path.exists('/.dockerenv') or os.environ.get('CONTAINER'):
+                    env_info = " (Docker on macOS)"
+                else:
+                    env_info = " (macOS Local)"
+            
+            # Debug environment detection
+            logger.info(f"Environment detection: WSL={is_wsl_environment()}, Docker={is_rancher_desktop()}, Platform={platform.system()}")
+            logger.info(f"⚡ Parallel Processing Enabled: Running tests with {worker_count} workers for faster execution{env_info}")
+            st.info(f"⚡ **Parallel Processing Enabled**: Running tests with {worker_count} workers for faster execution{env_info}")
             
             # Create list of all test tasks
             test_tasks = []
@@ -439,6 +490,9 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                         test_tasks.append((url_pair, browser, device))
             
             # Run tests in parallel
+            logger.info(f"🚀 Executing {total_tests} tests in parallel with {worker_count} workers...")
+            status_text.text(f"🚀 **Executing {total_tests} tests in parallel** with {worker_count} workers...")
+            
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 # Submit all tasks
                 future_to_task = {
@@ -450,6 +504,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                 for future in as_completed(future_to_task):
                     # Check for stop signal
                     if st.session_state.stop_testing:
+                        logger.info("🛑 Tests stopped by user")
                         status_text.text("🛑 Tests stopped by user")
                         st.session_state.test_running = False
                         # Cancel remaining tasks
@@ -471,6 +526,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                     else:
                         timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s")
                     
+                    logger.info(f"✅ Completed {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
                     status_text.text(f"Completed {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
                     
                     try:
@@ -481,8 +537,10 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                             result_manager.save_result(test_id, result)
                             if result.get('is_match'):
                                 passed_count += 1
+                                logger.info(f"✅ PASS: {url_pair['name']} - {browser} {device} (Similarity: {result['similarity_score']:.1f}%)")
                             else:
                                 failed_count += 1
+                                logger.info(f"❌ FAIL: {url_pair['name']} - {browser} {device} (Similarity: {result['similarity_score']:.1f}%)")
                         else:
                             # Create a skipped test result record
                             skipped_result = {
@@ -523,11 +581,15 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                         skipped_count += 1
         else:
             # Sequential execution (original logic)
+            logger.info("🔄 Starting sequential execution... Running tests one by one...")
+            status_text.text("🔄 **Starting sequential execution...** Running tests one by one...")
+            
             for url_pair in url_pairs:
                 for browser in browsers:
                     for device in devices:
                         # Check for stop signal
                         if st.session_state.stop_testing:
+                            logger.info("🛑 Tests stopped by user")
                             status_text.text("🛑 Tests stopped by user")
                             st.session_state.test_running = False
                             return
@@ -537,6 +599,8 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                         progress_bar.progress(int(progress * 100))
                         
                         # Show detailed status
+                        logger.info(f"🔄 Test {current_test}/{total_tests}: {url_pair['name']} - {browser} {device}")
+                        status_text.text(f"🔄 **Test {current_test}/{total_tests}**: {url_pair['name']} - {browser} {device}")
                         elapsed = (datetime.now() - start_time).total_seconds()
                         if current_test > 1 and current_test < total_tests:
                             avg_time = elapsed / (current_test - 1)  # Use completed tests only
@@ -557,8 +621,10 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                             result_manager.save_result(test_id, result)
                             if result.get('is_match'):
                                 passed_count += 1
+                                logger.info(f"✅ PASS: {url_pair['name']} - {browser} {device} (Similarity: {result['similarity_score']:.1f}%)")
                             else:
                                 failed_count += 1
+                                logger.info(f"❌ FAIL: {url_pair['name']} - {browser} {device} (Similarity: {result['similarity_score']:.1f}%)")
                         else:
                             # Create a skipped test result record
                             skipped_result = {
@@ -599,6 +665,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         # Complete the test successfully
         progress_bar.progress(100)
         total_time = (datetime.now() - start_time).total_seconds()
+        logger.info(f"🎉 All tests completed successfully in {total_time:.1f} seconds!")
         status_text.text("🎉 All tests completed successfully!")
         timing_text.text(f"✅ Total time: {total_time:.1f}s")
         
@@ -606,9 +673,11 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         if len(results) > 0:
             passed = sum(1 for r in results if r['is_match'])
             failed = len(results) - passed
+            avg_similarity = sum(r['similarity_score'] for r in results)/len(results)
             
+            logger.info(f"📊 Results Summary: {passed} passed, {failed} failed, {skipped_count} skipped | Average similarity: {avg_similarity:.1f}%")
             st.success(f"🎉 Completed {len(results)} tests successfully in {total_time:.1f} seconds!")
-            st.success(f"📊 **Results Summary**: {passed} passed, {failed} failed, {skipped_count} skipped | Average similarity: {sum(r['similarity_score'] for r in results)/len(results):.1f}%")
+            st.success(f"📊 **Results Summary**: {passed} passed, {failed} failed, {skipped_count} skipped | Average similarity: {avg_similarity:.1f}%")
             
             # Show results immediately in expandable section
             with st.expander("📋 Quick Results Summary", expanded=True):
@@ -701,16 +770,14 @@ def run_single_test_sync(url_pair, browser, device, similarity_threshold, wait_t
 
 def should_use_parallel_processing():
     """Determine if parallel processing should be used based on system capabilities."""
-    # Use parallel processing on Linux systems (including WSL) with sufficient resources
-    if platform.system() == "Linux":
-        try:
-            # Check available CPU cores
-            cpu_count = os.cpu_count() or 1
-            # Use parallel processing if we have at least 2 cores
-            return cpu_count >= 2
-        except:
-            return False
-    return False
+    # Use parallel processing on all systems with sufficient resources
+    try:
+        # Check available CPU cores
+        cpu_count = os.cpu_count() or 1
+        # Use parallel processing if we have at least 2 cores
+        return cpu_count >= 2
+    except:
+        return False
 
 def is_wsl_environment():
     """Detect if running in WSL environment."""
@@ -751,15 +818,19 @@ def is_rancher_desktop():
         if os.environ.get('RANCHER_DESKTOP'):
             return True
         
-        # Check Docker info for Rancher Desktop
-        try:
-            result = subprocess.run(['docker', 'info'], capture_output=True, text=True, timeout=10)
-            if 'rancher' in result.stdout.lower():
-                return True
-        except:
-            pass
+        # Check if we're actually running inside a Docker container
+        # This is more reliable than just checking if Docker is installed
+        if os.path.exists('/.dockerenv'):
+            return True
             
+        # Check for container environment indicators
+        if os.environ.get('CONTAINER') or os.environ.get('DOCKER_CONTAINER'):
+            return True
+            
+        # Only check Docker info if we're in a container environment
+        # Having Docker installed doesn't mean we're running in Docker
         return False
+            
     except:
         return False
 
@@ -769,8 +840,8 @@ def get_optimal_worker_count():
         return 1
     
     cpu_count = os.cpu_count() or 1
-    # Use up to 4 workers to avoid overwhelming the system
-    return min(4, max(2, cpu_count - 1))
+    # Use up to 6 workers for better performance on modern systems
+    return min(6, max(2, cpu_count))
 
 def display_results_tab():
     """Show aggregate metrics and a filterable table of results."""
@@ -1120,11 +1191,24 @@ def manage_test_runs_tab():
         for run in test_runs:
             # Get summary stats for each run
             stats = result_manager.get_summary_stats(run['test_id'])
+            
+            # Debug logging
+            logger.info(f"Processing run {run['test_id']}: latest_timestamp={run['latest_timestamp']}, stats={stats}")
+            
+            # Format latest run timestamp safely
+            latest_run_display = "N/A"
+            if run['latest_timestamp']:
+                try:
+                    latest_run_display = run['latest_timestamp'][:19]
+                except Exception as e:
+                    logger.warning(f"Error formatting timestamp for {run['test_id']}: {e}")
+                    latest_run_display = "N/A"
+            
             run_data.append({
                 'Test ID': run['test_id'],
                 'Tests': run['result_count'],
                 'Pass Rate': f"{stats.get('pass_rate', 0):.1f}%" if stats else "N/A",
-                'Latest Run': run['latest_timestamp'][:19] if run['latest_timestamp'] else "N/A",
+                'Latest Run': latest_run_display,
                 'Actions': run['test_id']
             })
         

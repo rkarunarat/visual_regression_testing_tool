@@ -9,7 +9,7 @@ REM Check if Python is installed
 echo [INFO] Checking Python installation...
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python is not installed. Please install Python 3.11+ first.
+    echo [ERROR] Python is not installed. Please install Python 3.8+ first.
     echo [INFO] Visit: https://www.python.org/downloads/
     pause
     exit /b 1
@@ -18,6 +18,16 @@ if errorlevel 1 (
 REM Check Python version
 for /f "tokens=2" %%i in ('python --version 2^>^&1') do set PYTHON_VERSION=%%i
 echo [INFO] Python version: %PYTHON_VERSION%
+
+REM Check if Python version is compatible (3.8+)
+python -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Python 3.8+ is required. Current version: %PYTHON_VERSION%
+    echo [INFO] Please upgrade Python or use a different version.
+    pause
+    exit /b 1
+)
+echo [INFO] Python %PYTHON_VERSION% detected - using venv for isolation
 
 REM Check if pip is installed
 pip --version >nul 2>&1

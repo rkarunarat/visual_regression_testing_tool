@@ -361,12 +361,12 @@ def test_requirements_file():
             requirements = f.read()
         
         required_packages = [
-            'streamlit>=1.49.1',
-            'playwright>=1.55.0',
-            'pillow>=11.3.0',
-            'opencv-python-headless>=4.11.0.86',
-            'pandas>=2.3.2',
-            'reportlab>=4.1.0'
+            'streamlit>=1.39.0',
+            'playwright>=1.45.0',
+            'pillow>=10.4.0',
+            'opencv-python-headless>=4.10.0.0',
+            'pandas>=2.2.0',
+            'reportlab>=4.2.0'
         ]
         
         missing_packages = []

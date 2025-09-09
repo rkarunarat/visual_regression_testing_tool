@@ -67,19 +67,19 @@ PLAYWRIGHT_DEVICE_MAP = {
 
 # Viewport configurations
 VIEWPORT_CONFIGS = {
-    'Desktop': {'width': 1920, 'height': 1080},
-    'Desktop Mac': {'width': 1440, 'height': 900},
-    'Tablet': {'width': 768, 'height': 1024},
-    'Tablet Android': {'width': 800, 'height': 1280},
-    'Mobile': {'width': 375, 'height': 667},
-    'Mobile Android': {'width': 360, 'height': 640}
+    'Desktop': {'width': 1920, 'height': 1080},  # Standard desktop resolution
+    'Desktop Mac': {'width': 1440, 'height': 900},  # MacBook resolution
+    'Tablet': {'width': 768, 'height': 1024},  # iPad portrait
+    'Tablet Android': {'width': 800, 'height': 1280},  # Android tablet
+    'Mobile': {'width': 375, 'height': 667},  # iPhone
+    'Mobile Android': {'width': 360, 'height': 640}  # Android phone
 }
 
 # Default test settings
 DEFAULT_SETTINGS = {
     'similarity_threshold': 95.0,
-    'wait_time': 3,
-    'timeout': 30000,
+    'wait_time': 3,  # Keep 3s for slower sites
+    'timeout': 15000,  # Reduced from 30s to 15s
     'full_page_screenshot': True,
     'ignore_https_errors': True
 }

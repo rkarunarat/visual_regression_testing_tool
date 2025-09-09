@@ -1,14 +1,15 @@
 [project]
-name = "repl-nix-workspace"
+name = "visual-regression-testing-tool"
 version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.11"
+description = "Visual Regression Testing Tool for web applications"
+requires-python = ">=3.8"
 dependencies = [
-    "numpy>=2.3.2",
-    "opencv-python>=4.11.0.86",
-    "pandas>=2.3.2",
-    "pillow>=11.3.0",
-    "playwright>=1.55.0",
-    "scikit-image>=0.25.2",
-    "streamlit>=1.49.1",
+    "numpy>=1.26.0",
+    "opencv-python-headless>=4.10.0.0",
+    "pandas>=2.2.0",
+    "pillow>=10.4.0",
+    "playwright>=1.45.0",
+    "scikit-image>=0.23.0",
+    "streamlit>=1.39.0",
+    "reportlab>=4.2.0",
 ]

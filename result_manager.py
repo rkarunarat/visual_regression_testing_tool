@@ -149,14 +149,20 @@ class ResultManager:
                             latest_result = None
                             latest_time = None
                             
-                            for json_file in test_dir.glob("*.json"):
-                                with open(json_file, 'r') as f:
-                                    result = json.load(f)
-                                    result_time = datetime.fromisoformat(result['timestamp'])
-                                    
-                                    if latest_time is None or result_time > latest_time:
-                                        latest_time = result_time
-                                        latest_result = result
+                            # Look for JSON files recursively in subdirectories
+                            for json_file in test_dir.rglob("*.json"):
+                                try:
+                                    with open(json_file, 'r') as f:
+                                        result = json.load(f)
+                                        if 'timestamp' in result:
+                                            result_time = datetime.fromisoformat(result['timestamp'])
+                                            
+                                            if latest_time is None or result_time > latest_time:
+                                                latest_time = result_time
+                                                latest_result = result
+                                except Exception as json_error:
+                                    logger.warning(f"Error reading JSON file {json_file}: {json_error}")
+                                    continue
                             
                             test_runs.append({
                                 'test_id': test_dir.name,

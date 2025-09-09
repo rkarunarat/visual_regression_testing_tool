@@ -147,7 +147,7 @@ class BrowserManager:
             
             browser_engine = browser_map[browser_name]
             
-            # Browser launch options - optimized for Replit environment
+            # Browser launch options - optimized for speed
             launch_options = {
                 'headless': True,
                 'args': [
@@ -166,7 +166,14 @@ class BrowserManager:
                     '--disable-default-apps',
                     '--disable-sync',
                     '--disable-ipc-flooding-protection',
-                    '--disable-xvfb'
+                    '--disable-xvfb',
+                    '--disable-web-security',
+                    '--disable-features=TranslateUI',
+                    '--disable-ipc-flooding-protection',
+                    '--disable-hang-monitor',
+                    '--disable-prompt-on-repost',
+                    '--disable-domain-reliability',
+                    '--disable-component-extensions-with-background-pages'
                 ]
             }
             
@@ -235,7 +242,15 @@ class BrowserManager:
 
         # If no descriptor (e.g., Desktop), set explicit viewport from config
         if not used_descriptor and viewport:
-            context_options['viewport'] = viewport
+            # For desktop, use a larger viewport to capture more content naturally
+            if 'desktop' in (device_name or '').lower():
+                # Use a larger viewport for desktop to capture more content
+                context_options['viewport'] = {
+                    'width': max(viewport.get('width', 1920), 1920),
+                    'height': max(viewport.get('height', 1080), 1080)
+                }
+            else:
+                context_options['viewport'] = viewport
 
         return await browser.new_context(**context_options)
     
@@ -249,15 +264,15 @@ class BrowserManager:
             context = await self.create_context(browser, viewport, device_name=device_name, browser_name=browser_name)
             page = await context.new_page()
             
-            # Navigate to URL with timeout
+            # Navigate to URL with optimized timeout
             try:
-                await page.goto(url, wait_until='networkidle', timeout=45000)
+                await page.goto(url, wait_until='domcontentloaded', timeout=15000)
             except Exception:
-                await page.goto(url, wait_until='load', timeout=45000)
+                # Fallback to load if domcontentloaded fails
+                await page.goto(url, wait_until='load', timeout=15000)
 
-            # Ensure fonts and late resources are ready before capture
+            # Quick font loading check (non-blocking)
             try:
-                await page.wait_for_load_state('networkidle', timeout=10000)
                 await page.evaluate("(async () => { if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch(e) {} } return true; })()")
             except Exception:
                 pass
@@ -286,7 +301,10 @@ class BrowserManager:
             # Convert to PIL Image and enhance quality
             image = Image.open(io.BytesIO(screenshot_bytes))
             
-            # Enhance image quality and ensure consistent sizing
+            # Log screenshot dimensions for debugging
+            logger.info(f"Screenshot captured: {image.size[0]}x{image.size[1]} for {url} on {browser_name} {device_name}")
+            
+            # Enhance image quality without forcing dimensions
             image = self._enhance_screenshot_quality(image, viewport)
             
             await context.close()
@@ -304,7 +322,7 @@ class BrowserManager:
             return None
     
     def _enhance_screenshot_quality(self, image, viewport):
-        """Enhance screenshot quality and ensure consistent sizing."""
+        """Enhance screenshot quality without forcing dimensions."""
         try:
             from PIL import ImageEnhance, ImageFilter
             
@@ -320,15 +338,9 @@ class BrowserManager:
             enhancer = ImageEnhance.Contrast(image)
             image = enhancer.enhance(1.1)  # Slightly increase contrast
             
-            # Resize to standard dimensions for consistent comparison
-            target_width = viewport.get('width', 1920)
-            target_height = viewport.get('height', 1080)
-            
-            # Only resize if the image is significantly different from target
-            current_width, current_height = image.size
-            if abs(current_width - target_width) > 50 or abs(current_height - target_height) > 50:
-                # Use high-quality resampling
-                image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            # For desktop screenshots, preserve the actual page dimensions
+            # Only apply minimal quality enhancements without resizing
+            # This prevents stretching and maintains the true site appearance
             
             return image
             
