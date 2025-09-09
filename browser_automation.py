@@ -279,7 +279,6 @@ class BrowserManager:
             screenshot_bytes = await page.screenshot(
                 full_page=True, 
                 type='png',
-                quality=100,  # Maximum quality for PNG
                 animations='disabled',  # Disable animations for consistent screenshots
                 caret='hide'  # Hide text cursor
             )
