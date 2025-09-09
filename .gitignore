@@ -1,20 +1,88 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
 
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
 
+# Testing
 .pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Streamlit
 .streamlit/
 
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
+# Test results and reports
 /test_results/
 /screenshots/
 /reports/
 /attached_assets/
+/coverage/
+/artifacts/
 
-.vscode/
-.idea/
+# SSL certificates (if using custom SSL)
+/ssl/
+*.pem
+*.key
+*.crt
+*.csr
+
+# Backup files
+*.backup
+*.bak
+*.tmp
+*.temp
+
+# Node.js (if using any frontend tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+*.temp
+.cache/

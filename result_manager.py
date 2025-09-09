@@ -52,6 +52,11 @@ class ResultManager:
                 'screenshot_paths': screenshot_paths
             }
             
+            # Add skipped test metadata if applicable
+            if result.get('is_skipped', False):
+                result_metadata['is_skipped'] = True
+                result_metadata['skip_reason'] = str(result.get('skip_reason', 'Unknown reason'))
+            
             # Save metadata to JSON
             result_file = device_dir / f"{self._generate_result_filename(result)}.json"
             with open(result_file, 'w') as f:
@@ -197,8 +202,9 @@ class ResultManager:
                 return {}
             
             total_tests = len(results)
-            passed_tests = sum(1 for r in results if r.get('is_match', False))
-            failed_tests = total_tests - passed_tests
+            passed_tests = sum(1 for r in results if r.get('is_match', False) and not r.get('is_skipped', False))
+            failed_tests = sum(1 for r in results if not r.get('is_match', False) and not r.get('is_skipped', False))
+            skipped_tests = sum(1 for r in results if r.get('is_skipped', False))
             
             # Calculate average similarity score
             scores = [r.get('similarity_score', 0) for r in results]
@@ -228,6 +234,7 @@ class ResultManager:
                 'total_tests': total_tests,
                 'passed_tests': passed_tests,
                 'failed_tests': failed_tests,
+                'skipped_tests': skipped_tests,
                 'pass_rate': (passed_tests / total_tests * 100) if total_tests > 0 else 0,
                 'average_similarity': avg_similarity,
                 'browsers': browsers,

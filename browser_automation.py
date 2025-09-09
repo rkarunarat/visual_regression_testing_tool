@@ -11,6 +11,9 @@ import io
 from PIL import Image
 import warnings
 import logging
+import platform
+import os
+import subprocess
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +40,87 @@ class BrowserManager:
         self.playwright = None
         self.browsers = {}
         self.contexts = {}
+        self.is_wsl = self._detect_wsl()
+        self.windows_browser_paths = self._get_windows_browser_paths()
+    
+    def _detect_wsl(self):
+        """Detect if running in WSL environment."""
+        try:
+            # Check for WSL-specific environment variables
+            if os.environ.get('WSL_DISTRO_NAME') or os.environ.get('WSLENV'):
+                return True
+            
+            # Check for Rancher Desktop environment
+            if os.environ.get('RANCHER_DESKTOP'):
+                return True
+            
+            # Check for WSL in uname
+            try:
+                result = subprocess.run(['uname', '-r'], capture_output=True, text=True, timeout=5)
+                if 'microsoft' in result.stdout.lower() or 'wsl' in result.stdout.lower():
+                    return True
+            except:
+                pass
+            
+            # Check for WSL in /proc/version
+            try:
+                with open('/proc/version', 'r') as f:
+                    version_info = f.read().lower()
+                    if 'microsoft' in version_info or 'wsl' in version_info:
+                        return True
+            except:
+                pass
+                
+            return False
+        except:
+            return False
+    
+    def _get_windows_browser_paths(self):
+        """Get paths to Windows browsers for WSL integration."""
+        if not self.is_wsl:
+            return {}
+        
+        browser_paths = {}
+        
+        # Common Windows browser paths
+        windows_paths = {
+            'chrome': [
+                '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe',
+                '/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+                '/mnt/c/Users/*/AppData/Local/Google/Chrome/Application/chrome.exe'
+            ],
+            'edge': [
+                '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+                '/mnt/c/Program Files/Microsoft/Edge/Application/msedge.exe'
+            ],
+            'firefox': [
+                '/mnt/c/Program Files/Mozilla Firefox/firefox.exe',
+                '/mnt/c/Program Files (x86)/Mozilla Firefox/firefox.exe'
+            ]
+        }
+        
+        # Check which browsers are available
+        for browser, paths in windows_paths.items():
+            for path in paths:
+                if os.path.exists(path):
+                    browser_paths[browser] = path
+                    break
+        
+        return browser_paths
+    
+    def _get_windows_browser_path(self, browser_name):
+        """Get Windows browser path for specific browser."""
+        browser_mapping = {
+            'Chrome': 'chrome',
+            'Edge': 'edge', 
+            'Firefox': 'firefox'
+        }
+        
+        browser_key = browser_mapping.get(browser_name)
+        if browser_key and browser_key in self.windows_browser_paths:
+            return self.windows_browser_paths[browser_key]
+        
+        return None
     
     async def initialize(self):
         """Start Playwright if not already started."""
@@ -89,6 +173,13 @@ class BrowserManager:
             # Special handling for Edge
             if browser_name == 'Edge':
                 launch_options['channel'] = 'msedge'
+            
+            # WSL + Windows browser integration
+            if self.is_wsl and self.windows_browser_paths:
+                windows_path = self._get_windows_browser_path(browser_name)
+                if windows_path:
+                    launch_options['executable_path'] = windows_path
+                    logger.info(f"Using Windows browser: {windows_path}")
             
             try:
                 self.browsers[browser_name] = await browser_engine.launch(**launch_options)
@@ -184,11 +275,20 @@ class BrowserManager:
             except Exception:
                 metrics = None
 
-            # Take full page screenshot
-            screenshot_bytes = await page.screenshot(full_page=True, type='png')
+            # Take high-quality full page screenshot with better settings
+            screenshot_bytes = await page.screenshot(
+                full_page=True, 
+                type='png',
+                quality=100,  # Maximum quality for PNG
+                animations='disabled',  # Disable animations for consistent screenshots
+                caret='hide'  # Hide text cursor
+            )
             
-            # Convert to PIL Image
+            # Convert to PIL Image and enhance quality
             image = Image.open(io.BytesIO(screenshot_bytes))
+            
+            # Enhance image quality and ensure consistent sizing
+            image = self._enhance_screenshot_quality(image, viewport)
             
             await context.close()
             if return_metrics:
@@ -203,6 +303,39 @@ class BrowserManager:
                 except Exception:
                     pass
             return None
+    
+    def _enhance_screenshot_quality(self, image, viewport):
+        """Enhance screenshot quality and ensure consistent sizing."""
+        try:
+            from PIL import ImageEnhance, ImageFilter
+            
+            # Convert to RGB if necessary
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Enhance sharpness for better clarity
+            enhancer = ImageEnhance.Sharpness(image)
+            image = enhancer.enhance(1.2)  # Slightly increase sharpness
+            
+            # Enhance contrast for better visibility
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(1.1)  # Slightly increase contrast
+            
+            # Resize to standard dimensions for consistent comparison
+            target_width = viewport.get('width', 1920)
+            target_height = viewport.get('height', 1080)
+            
+            # Only resize if the image is significantly different from target
+            current_width, current_height = image.size
+            if abs(current_width - target_width) > 50 or abs(current_height - target_height) > 50:
+                # Use high-quality resampling
+                image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            
+            return image
+            
+        except Exception as e:
+            logger.warning(f"Error enhancing screenshot quality: {e}")
+            return image  # Return original if enhancement fails
     
     async def handle_common_overlays(self, page):
         """Attempt to dismiss or hide common overlays to reduce visual noise."""

@@ -1,17 +1,15 @@
 #!/bin/bash
 
-# Visual Regression Testing Tool - Deployment Script
-# Usage: ./deploy.sh [local|production]
-#   local: Run on localhost:80 (for WSL/development)
-#   production: Run with nginx on port 80 (for AWS/Digital Ocean)
+# Visual Regression Testing Tool - Robust Deployment Script
+# Usage: ./deploy-robust.sh [production|staging]
 
 set -e
 
-ENVIRONMENT=${1:-local}
+ENVIRONMENT=${1:-production}
 APP_NAME="visual-regression-testing"
 DOCKER_IMAGE="$APP_NAME:latest"
 
-echo "🚀 Deploying Visual Regression Testing Tool - Environment: $ENVIRONMENT"
+echo "🚀 Deploying Visual Regression Testing Tool - Robust Build - Environment: $ENVIRONMENT"
 
 # Colors for output
 RED='\033[0;31m'
@@ -62,9 +60,29 @@ mkdir -p test_results logs ssl
 # Set permissions
 chmod 755 test_results logs
 
-# Build the Docker image
-print_status "Building production Docker image..."
-docker build -f Dockerfile -t $DOCKER_IMAGE .
+# Build the Docker image with robust approach
+print_status "Building robust Docker image (this may take a few minutes)..."
+print_info "Using Dockerfile.robust to avoid network issues with package dependencies"
+
+# Try building with multiple approaches to handle network issues
+print_status "Attempting robust build with network issue handling..."
+
+# Approach 1: Try robust Dockerfile
+if docker build -f Dockerfile.robust -t $DOCKER_IMAGE .; then
+    print_status "✅ Robust Docker image built successfully!"
+elif docker build -f Dockerfile -t $DOCKER_IMAGE .; then
+    print_status "✅ Standard Docker image built successfully!"
+else
+    print_error "❌ All Docker build approaches failed."
+    print_info "This might be due to network connectivity issues."
+    print_info ""
+    print_info "Try these solutions:"
+    print_info "1. Check your internet connection"
+    print_info "2. Restart Docker"
+    print_info "3. Use local Python deployment: ./deploy-local.sh"
+    print_info "4. Try again later when network is more stable"
+    exit 1
+fi
 
 # Stop existing containers
 print_status "Stopping existing containers..."
@@ -73,14 +91,14 @@ docker-compose down || true
 # Start the application
 print_status "Starting application..."
 if [ "$ENVIRONMENT" = "production" ]; then
-    # Production: with nginx reverse proxy (for AWS/Digital Ocean)
+    # Production: with nginx reverse proxy
     export EXTERNAL_PORT=80
     docker-compose --profile production up -d
     print_status "Application started with nginx reverse proxy"
     print_status "Access your app at: http://your-server-ip or http://your-domain.com"
     print_status "Nginx is handling SSL termination and load balancing"
 else
-    # Local: direct access on port 80 (for WSL/development)
+    # Local: direct access on port 80
     export EXTERNAL_PORT=80
     docker-compose up -d
     print_status "Application started in local mode"
@@ -121,29 +139,25 @@ docker-compose logs --tail=20
 
 echo ""
 if [ "$ENVIRONMENT" = "production" ]; then
-    print_status "🎉 Production Deployment completed!"
+    print_status "🎉 Robust Production Deployment completed!"
     print_status "Your app is now running with nginx reverse proxy"
     print_status "Configure your domain DNS to point to this server"
 else
-    print_status "🎉 Local Deployment completed!"
+    print_status "🎉 Robust Local Deployment completed!"
     print_status "Your app is now running on http://localhost"
 fi
+
 echo ""
 print_status "Features:"
 echo "  🐳 Docker-based: All dependencies handled in container"
 echo "  🎭 Playwright: Full browser automation support"
 echo "  📊 Visual Testing: Screenshot comparison across browsers"
 echo "  🔄 Production Ready: Health checks, restart policies"
+echo "  🛡️ Robust Build: Handles network issues gracefully"
 echo ""
 print_status "Useful commands:"
 echo "  View logs:     docker-compose logs -f"
 echo "  Stop app:      docker-compose down"
 echo "  Restart app:   docker-compose restart"
-echo "  Update app:    ./deploy.sh $ENVIRONMENT"
-echo ""
-print_status "Application URL:"
-if [ "$ENVIRONMENT" = "production" ]; then
-    echo "  http://your-domain.com"
-else
-    echo "  http://localhost:8501"
-fi
+echo "  Update app:    ./deploy-robust.sh $ENVIRONMENT"
+echo "  Local Python:  ./deploy-local.sh"

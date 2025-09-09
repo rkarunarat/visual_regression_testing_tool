@@ -15,6 +15,9 @@ from pathlib import Path
 import zipfile
 import subprocess
 import shutil
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import platform
 
 # Graceful imports with fallbacks
 try:
@@ -418,15 +421,43 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
     results = []
     
     try:
-        for url_pair in url_pairs:
-            for browser in browsers:
-                for device in devices:
+        # Check if we should use parallel processing
+        use_parallel = should_use_parallel_processing()
+        worker_count = get_optimal_worker_count()
+        
+        if use_parallel and total_tests > 1:
+            status_text.text(f"🚀 Using parallel processing with {worker_count} workers...")
+            wsl_info = " (WSL + Windows Browsers)" if is_wsl_environment() else ""
+            rancher_info = " + Rancher Desktop" if is_rancher_desktop() else ""
+            st.info(f"⚡ **Parallel Processing Enabled**: Running tests with {worker_count} workers for faster execution{wsl_info}{rancher_info}")
+            
+            # Create list of all test tasks
+            test_tasks = []
+            for url_pair in url_pairs:
+                for browser in browsers:
+                    for device in devices:
+                        test_tasks.append((url_pair, browser, device))
+            
+            # Run tests in parallel
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                # Submit all tasks
+                future_to_task = {
+                    executor.submit(run_single_test_sync, url_pair, browser, device, similarity_threshold, wait_time): (url_pair, browser, device)
+                    for url_pair, browser, device in test_tasks
+                }
+                
+                # Process completed tasks
+                for future in as_completed(future_to_task):
                     # Check for stop signal
                     if st.session_state.stop_testing:
                         status_text.text("🛑 Tests stopped by user")
                         st.session_state.test_running = False
+                        # Cancel remaining tasks
+                        for f in future_to_task:
+                            f.cancel()
                         return
                     
+                    url_pair, browser, device = future_to_task[future]
                     current_test += 1
                     progress = current_test / total_tests
                     progress_bar.progress(int(progress * 100))
@@ -434,36 +465,134 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                     # Show detailed status
                     elapsed = (datetime.now() - start_time).total_seconds()
                     if current_test > 1 and current_test < total_tests:
-                        avg_time = elapsed / (current_test - 1)  # Use completed tests only
+                        avg_time = elapsed / (current_test - 1)
                         remaining = (total_tests - current_test) * avg_time
                         timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s | Est. remaining: {remaining:.1f}s")
                     else:
                         timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s")
                     
-                    status_text.text(f"Testing {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
+                    status_text.text(f"Completed {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
                     
-                    # Run the actual test
-                    # Run the async single test in this thread
-                    result = asyncio.run(
-                        run_single_test(url_pair, browser, device, similarity_threshold, wait_time)
-                    )
-                    
-                    if result:
-                        results.append(result)
-                        result_manager.save_result(test_id, result)
-                        if result.get('is_match'):
-                            passed_count += 1
+                    try:
+                        result = future.result()
+                        
+                        if result:
+                            results.append(result)
+                            result_manager.save_result(test_id, result)
+                            if result.get('is_match'):
+                                passed_count += 1
+                            else:
+                                failed_count += 1
                         else:
-                            failed_count += 1
-        
-                    else:
+                            # Create a skipped test result record
+                            skipped_result = {
+                                'test_name': url_pair['name'],
+                                'browser': browser,
+                                'device': device,
+                                'device_model': PLAYWRIGHT_DEVICE_MAP.get(device, device),
+                                'staging_url': url_pair['staging_url'],
+                                'production_url': url_pair['production_url'],
+                                'similarity_score': 0.0,
+                                'is_match': False,
+                                'is_skipped': True,
+                                'skip_reason': 'Screenshot capture failed or test execution error',
+                                'staging_screenshot': None,
+                                'production_screenshot': None,
+                                'diff_image': None,
+                                'timestamp': datetime.now().isoformat(),
+                                'viewport_width': VIEWPORT_CONFIGS[device].get('width'),
+                                'viewport_height': VIEWPORT_CONFIGS[device].get('height'),
+                                'staging_runtime_metrics': {},
+                                'production_runtime_metrics': {}
+                            }
+                            results.append(skipped_result)
+                            result_manager.save_result(test_id, skipped_result)
+                            skipped_count += 1
+                        
+                        # Update session state with current results for real-time display
+                        st.session_state.test_results = results.copy()
+                        
+                        # Update live metrics
+                        m_completed.metric("Completed", f"{current_test}/{total_tests}")
+                        m_passed.metric("Passed", passed_count)
+                        m_failed.metric("Failed", failed_count)
+                        m_skipped.metric("Skipped", skipped_count)
+                        
+                    except Exception as e:
+                        st.error(f"Error in parallel test execution: {e}")
                         skipped_count += 1
+        else:
+            # Sequential execution (original logic)
+            for url_pair in url_pairs:
+                for browser in browsers:
+                    for device in devices:
+                        # Check for stop signal
+                        if st.session_state.stop_testing:
+                            status_text.text("🛑 Tests stopped by user")
+                            st.session_state.test_running = False
+                            return
+                        
+                        current_test += 1
+                        progress = current_test / total_tests
+                        progress_bar.progress(int(progress * 100))
+                        
+                        # Show detailed status
+                        elapsed = (datetime.now() - start_time).total_seconds()
+                        if current_test > 1 and current_test < total_tests:
+                            avg_time = elapsed / (current_test - 1)  # Use completed tests only
+                            remaining = (total_tests - current_test) * avg_time
+                            timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s | Est. remaining: {remaining:.1f}s")
+                        else:
+                            timing_text.text(f"⏱️ Elapsed: {elapsed:.1f}s")
+                        
+                        status_text.text(f"Testing {url_pair['name']} on {browser} ({device})... ({current_test}/{total_tests})")
+                        
+                        # Run the actual test
+                        result = asyncio.run(
+                            run_single_test(url_pair, browser, device, similarity_threshold, wait_time)
+                        )
+                        
+                        if result:
+                            results.append(result)
+                            result_manager.save_result(test_id, result)
+                            if result.get('is_match'):
+                                passed_count += 1
+                            else:
+                                failed_count += 1
+                        else:
+                            # Create a skipped test result record
+                            skipped_result = {
+                                'test_name': url_pair['name'],
+                                'browser': browser,
+                                'device': device,
+                                'device_model': PLAYWRIGHT_DEVICE_MAP.get(device, device),
+                                'staging_url': url_pair['staging_url'],
+                                'production_url': url_pair['production_url'],
+                                'similarity_score': 0.0,
+                                'is_match': False,
+                                'is_skipped': True,
+                                'skip_reason': 'Screenshot capture failed or test execution error',
+                                'staging_screenshot': None,
+                                'production_screenshot': None,
+                                'diff_image': None,
+                                'timestamp': datetime.now().isoformat(),
+                                'viewport_width': VIEWPORT_CONFIGS[device].get('width'),
+                                'viewport_height': VIEWPORT_CONFIGS[device].get('height'),
+                                'staging_runtime_metrics': {},
+                                'production_runtime_metrics': {}
+                            }
+                            results.append(skipped_result)
+                            result_manager.save_result(test_id, skipped_result)
+                            skipped_count += 1
 
-                    # Update live metrics
-                    m_completed.metric("Completed", f"{current_test}/{total_tests}")
-                    m_passed.metric("Passed", passed_count)
-                    m_failed.metric("Failed", failed_count)
-                    m_skipped.metric("Skipped", skipped_count)
+                        # Update session state with current results for real-time display
+                        st.session_state.test_results = results.copy()
+
+                        # Update live metrics
+                        m_completed.metric("Completed", f"{current_test}/{total_tests}")
+                        m_passed.metric("Passed", passed_count)
+                        m_failed.metric("Failed", failed_count)
+                        m_skipped.metric("Skipped", skipped_count)
         # Store results in session state
         st.session_state.test_results = results
         
@@ -566,6 +695,83 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
         except Exception:
             pass
 
+def run_single_test_sync(url_pair, browser, device, similarity_threshold, wait_time):
+    """Synchronous wrapper for run_single_test to use with ThreadPoolExecutor."""
+    return asyncio.run(run_single_test(url_pair, browser, device, similarity_threshold, wait_time))
+
+def should_use_parallel_processing():
+    """Determine if parallel processing should be used based on system capabilities."""
+    # Use parallel processing on Linux systems (including WSL) with sufficient resources
+    if platform.system() == "Linux":
+        try:
+            # Check available CPU cores
+            cpu_count = os.cpu_count() or 1
+            # Use parallel processing if we have at least 2 cores
+            return cpu_count >= 2
+        except:
+            return False
+    return False
+
+def is_wsl_environment():
+    """Detect if running in WSL environment."""
+    try:
+        # Check for WSL-specific environment variables
+        if os.environ.get('WSL_DISTRO_NAME') or os.environ.get('WSLENV'):
+            return True
+        
+        # Check for Rancher Desktop environment
+        if os.environ.get('RANCHER_DESKTOP'):
+            return True
+        
+        # Check for WSL in uname
+        try:
+            result = subprocess.run(['uname', '-r'], capture_output=True, text=True, timeout=5)
+            if 'microsoft' in result.stdout.lower() or 'wsl' in result.stdout.lower():
+                return True
+        except:
+            pass
+        
+        # Check for WSL in /proc/version
+        try:
+            with open('/proc/version', 'r') as f:
+                version_info = f.read().lower()
+                if 'microsoft' in version_info or 'wsl' in version_info:
+                    return True
+        except:
+            pass
+            
+        return False
+    except:
+        return False
+
+def is_rancher_desktop():
+    """Detect if running with Rancher Desktop."""
+    try:
+        # Check for Rancher Desktop environment variable
+        if os.environ.get('RANCHER_DESKTOP'):
+            return True
+        
+        # Check Docker info for Rancher Desktop
+        try:
+            result = subprocess.run(['docker', 'info'], capture_output=True, text=True, timeout=10)
+            if 'rancher' in result.stdout.lower():
+                return True
+        except:
+            pass
+            
+        return False
+    except:
+        return False
+
+def get_optimal_worker_count():
+    """Get optimal number of worker threads for parallel processing."""
+    if not should_use_parallel_processing():
+        return 1
+    
+    cpu_count = os.cpu_count() or 1
+    # Use up to 4 workers to avoid overwhelming the system
+    return min(4, max(2, cpu_count - 1))
+
 def display_results_tab():
     """Show aggregate metrics and a filterable table of results."""
     st.header("Test Results")
@@ -578,26 +784,40 @@ def display_results_tab():
     results_data = []
     for result in st.session_state.test_results:
         device_model = PLAYWRIGHT_DEVICE_MAP.get(result['device'], result['device'])
+        
+        # Determine status based on test result
+        if result.get('is_skipped', False):
+            status = "⚠️ Skipped"
+            similarity = "N/A"
+        elif result['is_match']:
+            status = "✅ Pass"
+            similarity = f"{result['similarity_score']:.1f}"
+        else:
+            status = "❌ Fail"
+            similarity = f"{result['similarity_score']:.1f}"
+        
         results_data.append({
             'Test Name': result['test_name'],
             'Browser': result['browser'],
             'Device': f"{result['device']} ({device_model})",
             'Viewport': f"{result.get('viewport_width','?')}x{result.get('viewport_height','?')}",
-            'Similarity (%)': f"{result['similarity_score']:.1f}",
-            'Status': "✅ Pass" if result['is_match'] else "❌ Fail",
+            'Similarity (%)': similarity,
+            'Status': status,
             'Staging URL': result['staging_url'],
-            'Production URL': result['production_url']
+            'Production URL': result['production_url'],
+            'Skip Reason': result.get('skip_reason', '') if result.get('is_skipped', False) else ''
         })
     
     df = pd.DataFrame(results_data)
     
     # Summary statistics
     total_tests = len(results_data)
-    passed_tests = sum(1 for r in st.session_state.test_results if r['is_match'])
-    failed_tests = total_tests - passed_tests
+    passed_tests = sum(1 for r in st.session_state.test_results if r['is_match'] and not r.get('is_skipped', False))
+    failed_tests = sum(1 for r in st.session_state.test_results if not r['is_match'] and not r.get('is_skipped', False))
+    skipped_tests = sum(1 for r in st.session_state.test_results if r.get('is_skipped', False))
     
     # Summary statistics
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("📊 Total Tests", total_tests)
     with col2:
@@ -605,13 +825,15 @@ def display_results_tab():
     with col3:
         st.metric("❌ Failed", failed_tests)
     with col4:
+        st.metric("⚠️ Skipped", skipped_tests)
+    with col5:
         pass_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
         st.metric("📈 Pass Rate", f"{pass_rate:.1f}%")
     
     # Filter options
     col1, col2, col3 = st.columns(3)
     with col1:
-        status_filter = st.selectbox("Filter by Status", ["All", "Pass", "Fail"], help="Show only passing, failing, or all results")
+        status_filter = st.selectbox("Filter by Status", ["All", "Pass", "Fail", "Skipped"], help="Show only passing, failing, skipped, or all results")
     with col2:
         browser_filter = st.selectbox("Filter by Browser", ["All"] + list(set(df['Browser'])), help="Limit results to a specific browser")
     with col3:
@@ -620,7 +842,12 @@ def display_results_tab():
     # Apply filters
     filtered_df = df.copy()
     if status_filter != "All":
-        status_symbol = "✅ Pass" if status_filter == "Pass" else "❌ Fail"
+        if status_filter == "Pass":
+            status_symbol = "✅ Pass"
+        elif status_filter == "Fail":
+            status_symbol = "❌ Fail"
+        elif status_filter == "Skipped":
+            status_symbol = "⚠️ Skipped"
         filtered_df = filtered_df[filtered_df['Status'] == status_symbol]
     if browser_filter != "All":
         filtered_df = filtered_df[filtered_df['Browser'] == browser_filter]

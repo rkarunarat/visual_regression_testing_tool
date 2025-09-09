@@ -1,16 +1,17 @@
-# Visual Diff
+# Visual Regression Testing Tool
 
-A Streamlit-based visual regression tool that screenshots pairs of URLs across browsers/devices, compares images, and reports differences.
+A comprehensive Streamlit-based visual regression testing tool that captures screenshots of websites across multiple browsers and devices, compares them, and reports visual differences.
 
-## Features
+## ✨ Features
 
-- URL pairs input (manual/CSV)
-- Multi-browser and multi-device testing (Chrome recommended)
-- Per-combo screenshots (staging/production) and visual diff
-- Detailed Comparison UI: side-by-side, overlay with opacity, diff
-- Results management: list, load, export ZIP, delete/cleanup
-- Reports: Summary PDF (table) and Full PDF (SxP, overlay, diff per test)
-- **Production Ready**: Docker, systemd service, nginx reverse proxy, SSL support
+- **Multi-Browser Testing**: Chrome, Firefox, Safari, Edge support
+- **Device Emulation**: Desktop, Tablet, Mobile device testing
+- **Visual Comparison**: Side-by-side, overlay, and diff views
+- **URL Management**: Manual input or CSV import for bulk testing
+- **Results Management**: Export, cleanup, and detailed comparison views
+- **PDF Reports**: Summary and detailed reports with screenshots
+- **Production Ready**: Docker containerization, health checks, nginx support
+- **WSL Compatible**: Works with Rancher Desktop and Windows Subsystem for Linux
 
 ## Dependencies
 
@@ -30,12 +31,90 @@ These reflect `requirements.txt`.
 
 Alternative stacks sometimes used elsewhere: Selenium, WebDriver Manager, ImageHash (not used here).
 
-## 🧪 Testing
+## 🚀 Quick Start
 
-Before deploying or pushing changes, run the comprehensive test suite:
+Choose your deployment method:
+
+### Option 1: Docker Deployment (Recommended)
+**Prerequisites:** Docker and Docker Compose installed
+- **Docker Desktop** or **Rancher Desktop** (both work the same way)
 
 ```bash
-# Run all functionality tests
+# Local development (port 80)
+./deploy.sh local
+
+# Production deployment (with nginx)
+./deploy.sh production
+
+# Robust deployment (for network issues)
+./deploy-robust.sh local
+```
+
+### Option 2: Local Python Environment
+**Prerequisites:** Python 3.11+ installed
+- No Docker required
+- Uses virtual environment
+- Installs all dependencies automatically
+
+```bash
+# Linux/macOS
+./deploy-local.sh
+
+# Windows
+deploy-local.bat
+```
+
+**Access:** http://localhost:8501
+
+📖 **[LOCAL-SETUP.md](LOCAL-SETUP.md)** - Detailed local setup guide
+
+### Deployment Method Comparison
+
+| Feature | Docker Deployment | Local Python Deployment |
+|---------|------------------|------------------------|
+| **Setup Complexity** | ⭐⭐ Simple | ⭐⭐⭐ Moderate |
+| **Dependencies** | Docker + Docker Compose | Python 3.11+ |
+| **Isolation** | ✅ Complete container isolation | ✅ Virtual environment |
+| **Port** | 80 (local) or 80 (production) | 8501 |
+| **Resource Usage** | Higher (container overhead) | Lower (native Python) |
+| **Cross-platform** | ✅ Works everywhere | ⚠️ Platform-specific |
+| **Production Ready** | ✅ With nginx | ⚠️ Manual setup needed |
+| **Updates** | `./deploy.sh` | `git pull && ./deploy-local.sh` |
+
+### What Happens During Deployment
+
+**Docker Deployment:**
+1. **Docker Build**: Creates container with Python, Playwright, and all dependencies
+2. **Browser Installation**: Automatically installs Chromium, Firefox, and WebKit
+3. **Health Checks**: Verifies application is running correctly
+4. **Ready to Use**: Access the web interface at localhost (port 80) or localhost:8501
+
+**Local Python Deployment:**
+1. **Virtual Environment**: Creates isolated Python environment
+2. **Dependencies**: Installs all required Python packages
+3. **Playwright Setup**: Installs browsers and system dependencies
+4. **Testing**: Runs functionality tests to verify setup
+5. **Ready to Use**: Starts Streamlit application at localhost:8501
+
+## 🧪 Testing
+
+### Running Tests
+
+**Option 1: Tests run automatically during deployment**
+```bash
+# Docker deployment - tests run inside container
+./deploy.sh local
+
+# Local Python deployment - tests run in virtual environment
+./deploy-local.sh
+```
+
+**Option 2: Run tests locally (requires Python dependencies)**
+```bash
+# Install dependencies first
+pip install -r requirements.txt
+
+# Then run tests
 python test_functionality.py
 
 # Or use the test runner scripts
@@ -43,7 +122,14 @@ python test_functionality.py
 run_tests.bat         # Windows
 ```
 
-The test suite verifies:
+**Option 3: Run tests in Docker container**
+```bash
+# Build and run tests in container
+docker build -f Dockerfile -t visual-regression-testing .
+docker run --rm visual-regression-testing python test_functionality.py
+```
+
+### What Tests Verify
 - ✅ All imports and dependencies
 - ✅ Configuration data integrity
 - ✅ Utility functions
@@ -56,104 +142,188 @@ The test suite verifies:
 - ✅ Deployment files
 - ✅ Requirements file
 
-## Quick start
+> **Note**: If you run tests on host system without Python dependencies, some tests will fail. This is normal! Tests run automatically inside Docker container during deployment.
 
-- Python 3.11+
-- Create and activate a virtual environment (recommended):
+## 🐳 Deployment Options
 
-Windows (PowerShell):
-```
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-macOS/Linux:
-```
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-- Install dependencies and Playwright browsers:
-```
-pip install -r requirements.txt
-python -m playwright install chromium
-```
-
-- Run locally:
-```
-streamlit run app.py
-```
-
-- Deactivate the venv when done: `deactivate`
-
-## Folder structure
-
-```
-VisualDiff/
-  app.py                  # Streamlit app
-  browser_automation.py   # Playwright manager (internal)
-  browser_manager.py      # Import alias for clarity
-  image_comparison.py     # Comparator (internal)
-  image_comparator.py     # Import alias for clarity
-  result_manager.py       # Results persistence (internal)
-  results_store.py        # Import alias for clarity
-  config.py               # Browsers, devices, viewports
-  utils.py                # UI/util helpers
-  test_results/           # Saved runs: <test_id>/<browser>/<device>/
-```
-
-## Usage notes
-
-- Start with Chrome. Firefox mobile/tablet emulation can be limited depending on environment.
-- Results are stored under `test_results/<test_id>/<browser>/<device>/` with JSON + PNGs.
-- Use Manage Test Runs to load, export, or delete runs.
-
-## 🚀 Production Deployment
-
-For production deployment on your own server, we provide comprehensive deployment options:
-
-### 📖 [Complete Deployment Guide](README-DEPLOYMENT.md)
-
-**Quick Start Options:**
-
-#### 🐳 Docker Deployment (Recommended)
+### Local Development (WSL/Desktop)
 ```bash
-# One-command deployment
 ./deploy.sh local
+```
+- ✅ Runs on **port 80** (http://localhost)
+- ✅ Direct Streamlit access
+- ✅ Perfect for WSL + Rancher Desktop
+- ✅ No nginx overhead
 
-# With nginx reverse proxy
+### Production Deployment (AWS/Digital Ocean)
+```bash
 ./deploy.sh production
 ```
+- ✅ Runs on **port 80** (http://your-server-ip)
+- ✅ Includes nginx reverse proxy
+- ✅ Security headers and rate limiting
+- ✅ Ready for SSL/HTTPS setup
 
-#### 🖥️ Native Server Installation
+### Robust Deployment (For Network Issues)
 ```bash
-# Automated installation on Ubuntu/Debian
-sudo ./install.sh
+./deploy-robust.sh local      # For local development
+./deploy-robust.sh production # For production
+```
+- ✅ Uses robust Dockerfile with fallback logic
+- ✅ Handles package download issues gracefully
+- ✅ Best for environments with network restrictions
+
+
+### Useful Commands
+```bash
+# View logs
+docker-compose logs -f
+
+# Stop application
+docker-compose down
+
+# Restart application
+docker-compose restart
+
+# Update application
+./deploy.sh local        # For local development
+./deploy.sh production   # For production
+
+# Check container status
+docker-compose ps
 ```
 
-#### ☁️ Cloud Providers
-- **AWS EC2**: Launch instance → Run install script
-- **DigitalOcean**: Create droplet → Run install script
-- **Google Cloud**: Create VM → Run install script
+## ⚙️ Configuration
 
-### Key Features
-- ✅ **Production Ready**: Nginx reverse proxy, SSL support, security headers
-- ✅ **Auto-Restart**: Systemd service with automatic restarts
-- ✅ **Health Checks**: Built-in monitoring and health endpoints
-- ✅ **Security**: Non-root user, restricted permissions, firewall configs
-- ✅ **Monitoring**: Comprehensive logging and status checks
-- ✅ **Backup Ready**: Easy backup scripts for test results
+### Environment Variables
 
-### Simple Manual Deployment
+You can customize the application using environment variables:
+
 ```bash
-# Basic production run
-streamlit run app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+# Copy the example file
+cp env.example .env
+
+# Edit the configuration
+nano .env
 ```
 
-For detailed instructions, security configurations, and troubleshooting, see the [Complete Deployment Guide](README-DEPLOYMENT.md).
+**Key Configuration Options:**
+- `EXTERNAL_PORT`: External port (default: 80)
+- `STREAMLIT_SERVER_PORT`: Internal Streamlit port (default: 8501)
+- `DOMAIN`: Your domain for production (optional)
+- `LOG_LEVEL`: Logging level (default: INFO)
 
-## Troubleshooting
+## 🌐 Production Deployment
 
-- Firefox mobile/tablet: if runs fail, try Desktop only or use Chrome.
-- Large pages: DecompressionBombWarning is handled; very tall mobile images are cropped in PDFs.
-- If images don’t show after “Load Results”, the app loads them from disk automatically.
+For deploying to AWS, Digital Ocean, or other cloud providers, see the comprehensive guide:
+
+📖 **[PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md)** - Complete production setup guide
+
+**Quick Production Setup:**
+1. Deploy to your server: `./deploy.sh production`
+2. Configure your domain DNS to point to server IP
+3. Access at: `http://your-domain.com` (port 80)
+4. Optional: Set up SSL with Let's Encrypt
+
+## 🎯 How to Use
+
+### 1. Configure Test URLs
+- Add staging and production URL pairs manually
+- Or import from CSV for bulk testing
+- Set wait times and similarity thresholds
+
+### 2. Select Browsers & Devices
+- **Browsers**: Chrome, Firefox, Safari, Edge
+- **Devices**: Desktop, Tablet, Mobile (with device emulation)
+- **Viewports**: Automatic sizing based on device selection
+
+### 3. Run Visual Tests
+- Execute tests across all browser/device combinations
+- Real-time progress tracking
+- Automatic screenshot capture
+
+### 4. Analyze Results
+- **Side-by-side comparison**: Staging vs Production
+- **Overlay view**: With opacity control
+- **Diff view**: Highlighted differences
+- **Similarity scores**: SSIM, pixel, and histogram metrics
+
+### 5. Export & Manage
+- **PDF Reports**: Summary and detailed reports
+- **ZIP Export**: All screenshots and data
+- **Result Management**: Load, delete, cleanup old tests
+
+## 🏗️ Architecture
+
+- **Frontend**: Streamlit web interface with real-time updates
+- **Browser Automation**: Playwright for cross-browser testing
+- **Image Processing**: PIL, OpenCV, scikit-image for visual comparison
+- **Storage**: Local file system with organized test results
+- **Deployment**: Docker containers with health checks and nginx support
+- **Testing**: Comprehensive test suite for all functionality
+
+## 📁 Project Structure
+
+```
+visual_regression_testing_tool/
+├── 🐳 Docker & Deployment
+│   ├── Dockerfile              # Standard production Dockerfile
+│   ├── Dockerfile.robust       # Robust version for network issues
+│   ├── docker-compose.yml      # Docker Compose configuration
+│   ├── deploy.sh               # Standard deployment script
+│   └── deploy-robust.sh        # Robust deployment script
+├── 🎯 Core Application
+│   ├── app.py                  # Main Streamlit application
+│   ├── browser_automation.py   # Playwright browser automation
+│   ├── browser_manager.py      # Browser manager wrapper
+│   ├── config.py               # Configuration settings
+│   ├── image_comparator.py     # Image comparison logic
+│   ├── image_comparison.py     # Image comparison utilities
+│   ├── result_manager.py       # Test result management
+│   ├── results_store.py        # Result storage utilities
+│   ├── utils.py                # Utility functions
+│   └── test_functionality.py   # Comprehensive test suite
+├── 📚 Documentation
+│   ├── README.md               # Main documentation
+│   ├── DEPLOYMENT-GUIDE.md     # Deployment guide
+│   ├── FILE-STRUCTURE.md       # File structure overview
+│   └── rancher-desktop-setup.md # Rancher Desktop setup
+└── 🧪 Testing
+    ├── run_tests.sh            # Linux/macOS test runner
+    └── run_tests.bat           # Windows test runner
+```
+
+## 📖 Additional Documentation
+
+- **[Deployment Guide](README-DEPLOYMENT.md)** - Complete deployment instructions
+- **[File Structure](FILE-STRUCTURE.md)** - Detailed file organization
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+**Build Issues:**
+- Use `./deploy-robust.sh` for network/package download issues
+- Check Docker daemon is running: `docker info`
+- Ensure sufficient disk space for browser downloads
+
+**Access Issues:**
+- Verify port 8501 is available: `netstat -an | grep 8501`
+- Check firewall settings
+- Ensure Docker containers are running: `docker-compose ps`
+
+**Browser Issues:**
+- Playwright browsers are installed automatically in containers
+- No need for local browser installation
+- Works in headless mode for all browsers
+
+**Performance Issues:**
+- Start with Chrome for best compatibility
+- Firefox mobile/tablet emulation may be limited
+- Large pages are handled automatically with image optimization
+
+### Getting Help
+
+- Check logs: `docker-compose logs -f`
+- View container status: `docker-compose ps`
+- Restart if needed: `docker-compose restart`

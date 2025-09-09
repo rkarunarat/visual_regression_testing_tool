@@ -1,4 +1,4 @@
-# Production Dockerfile for Visual Regression Testing Tool
+# Robust Production Dockerfile for Visual Regression Testing Tool
 FROM python:3.11-slim
 
 # Set environment variables
@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Install essential system dependencies with retry logic
+# Install essential system dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -24,10 +24,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers without system dependencies first
+# Install Playwright browsers (without system deps to avoid network issues)
 RUN playwright install chromium firefox webkit
 
-# Install minimal system dependencies for Playwright manually
+# Install only the essential system dependencies manually
 # Split into smaller chunks to avoid network issues
 RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends \
     libnss3 \
@@ -48,6 +48,14 @@ RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends \
     libasound2 \
     libatspi2.0-0 \
     libgtk-3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxtst6 \
+    libxi6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy application code

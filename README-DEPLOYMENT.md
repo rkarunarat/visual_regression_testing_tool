@@ -1,6 +1,6 @@
-# Visual Regression Testing Tool - Deployment Guide
+# Deployment Guide
 
-This guide provides multiple deployment options for the Visual Regression Testing Tool on your own server.
+This guide provides comprehensive deployment options for the Visual Regression Testing Tool.
 
 ## 🚀 Quick Start (Docker - Recommended)
 
