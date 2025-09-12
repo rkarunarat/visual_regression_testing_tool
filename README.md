@@ -2,6 +2,16 @@
 
 Catch visual bugs before users do! A comprehensive Streamlit-based solution for automated visual testing with advanced screenshot comparison, real-time progress tracking, and detailed reporting.
 
+## 🛠️ Technology Stack
+
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.49%2B-ff4b4b?logo=streamlit)
+![Playwright](https://img.shields.io/badge/Playwright-1.55%2B-brightgreen)
+![Pillow](https://img.shields.io/badge/Pillow-11.3%2B-9cf)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.11%2B-5C3EE8?logo=opencv&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
+![Deployment](https://img.shields.io/badge/Deployment-Production%20Ready-28a745)
+
 ## 🎯 What Problems Does This Solve?
 
 ### **For QA Teams**
