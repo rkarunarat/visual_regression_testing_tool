@@ -18,25 +18,16 @@ Catch visual bugs before users do! A comprehensive Streamlit-based solution for 
 - **Catch visual regressions** before they reach production
 - **Automate repetitive visual testing** across multiple browsers and devices
 - **Generate professional reports** for stakeholders
-- **Compare staging vs production** environments instantly
 
 ### **For Frontend Developers**
 - **Verify responsive design** across different screen sizes
 - **Test cross-browser compatibility** automatically
 - **Detect layout shifts** and visual inconsistencies
-- **Validate UI changes** before deployment
 
 ### **For DevOps Teams**
 - **Integrate visual testing** into CI/CD pipelines
 - **Monitor production visual health** continuously
 - **Deploy with confidence** knowing visual changes are tracked
-- **Scale testing** across multiple environments
-
-### **For Product Teams**
-- **Ensure brand consistency** across all touchpoints
-- **Validate A/B test results** visually
-- **Maintain design system integrity**
-- **Track visual changes** over time
 
 ## ✨ Key Features
 
@@ -82,13 +73,6 @@ cd visual_regression_testing_tool
 - **Automated Testing**: Run visual tests on every deployment
 - **Regression Detection**: Catch visual changes in pull requests
 - **Quality Gates**: Block deployments with visual regressions
-- **Monitoring**: Continuous visual health monitoring
-
-### **Design System Validation**
-- **Component Testing**: Test individual UI components
-- **Brand Consistency**: Ensure design system compliance
-- **A/B Testing**: Compare different design variations
-- **Accessibility**: Visual accessibility testing
 
 ## 🏗️ How It Works
 
@@ -97,14 +81,6 @@ cd visual_regression_testing_tool
 3. **Run Tests**: Automated screenshot capture and comparison
 4. **Analyze Results**: Side-by-side, overlay, and diff views
 5. **Export Reports**: PDF reports and detailed exports
-
-## 🛠️ Technology Stack
-
-- **Frontend**: Streamlit web interface
-- **Automation**: Playwright browser automation
-- **Image Processing**: PIL, OpenCV, scikit-image
-- **Deployment**: Docker containers with nginx
-- **Reporting**: ReportLab PDF generation
 
 ## 📊 Comparison Views
 
@@ -120,7 +96,6 @@ Test your applications from different geographic locations:
 - **Europe**: London timezone and locale
 - **Asia**: Tokyo timezone and locale
 - **Middle East**: Dubai timezone and locale
-- **And more...**
 
 ## 📈 Perfect For
 
@@ -137,7 +112,6 @@ Test your applications from different geographic locations:
 - ✅ **Real-Time Updates** - Live progress tracking
 - ✅ **Production Ready** - Docker deployment with health checks
 - ✅ **Cross-Platform** - Works on Windows, macOS, Linux
-- ✅ **Active Development** - Regular updates and improvements
 
 ## 📚 Documentation
 
@@ -145,6 +119,12 @@ Test your applications from different geographic locations:
 - **[Production Setup](PRODUCTION-DEPLOYMENT.md)** - Production server deployment
 - **[Local Setup](LOCAL-SETUP.md)** - Local development setup
 - **[File Structure](FILE-STRUCTURE.md)** - Project organization
+
+## ☕ Support This Project
+
+If this tool helps you catch visual bugs and saves you time, consider supporting the development:
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/creativerosh)
 
 ## 🤝 Contributing
 
