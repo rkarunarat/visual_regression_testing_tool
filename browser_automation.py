@@ -14,6 +14,7 @@ import logging
 import platform
 import os
 import subprocess
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,8 @@ if sys.platform.startswith("win"):
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
+
+# Geo-location proxy mechanism removed - keeping simple locale support only
 
 class BrowserManager:
     """Manage Playwright, browsers/contexts, and screenshot capture."""
@@ -131,82 +134,98 @@ class BrowserManager:
         """Get or launch a browser engine by friendly name (Chrome, Firefox...)."""
         await self.initialize()
         
-        if browser_name not in self.browsers:
-            if self.playwright is None:
-                raise RuntimeError("Playwright not initialized")
-                
-            browser_map = {
-                'Chrome': self.playwright.chromium,
-                'Firefox': self.playwright.firefox,
-                'Safari': self.playwright.webkit,
-                'Edge': self.playwright.chromium  # Edge uses Chromium engine
-            }
-            
-            if browser_name not in browser_map:
-                raise ValueError(f"Unsupported browser: {browser_name}")
-            
-            browser_engine = browser_map[browser_name]
-            
-            # Browser launch options - optimized for speed
-            launch_options = {
-                'headless': True,
-                'args': [
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-features=VizDisplayCompositor',
-                    '--disable-extensions',
-                    '--disable-plugins',
-                    '--no-first-run',
-                    '--disable-background-timer-throttling',
-                    '--disable-renderer-backgrounding',
-                    '--disable-backgrounding-occluded-windows',
-                    '--disable-software-rasterizer',
-                    '--disable-background-networking',
-                    '--disable-default-apps',
-                    '--disable-sync',
-                    '--disable-ipc-flooding-protection',
-                    '--disable-xvfb',
-                    '--disable-web-security',
-                    '--disable-features=TranslateUI',
-                    '--disable-ipc-flooding-protection',
-                    '--disable-hang-monitor',
-                    '--disable-prompt-on-repost',
-                    '--disable-domain-reliability',
-                    '--disable-component-extensions-with-background-pages'
-                ]
-            }
-            
-            # Special handling for Edge
-            if browser_name == 'Edge':
-                launch_options['channel'] = 'msedge'
-            
-            # WSL + Windows browser integration
-            if self.is_wsl and self.windows_browser_paths:
-                windows_path = self._get_windows_browser_path(browser_name)
-                if windows_path:
-                    launch_options['executable_path'] = windows_path
-                    logger.info(f"Using Windows browser: {windows_path}")
-            
+        # Check if browser exists and is still connected
+        if browser_name in self.browsers:
             try:
-                self.browsers[browser_name] = await browser_engine.launch(**launch_options)
+                # Test if browser is still alive by checking if it's connected
+                browser = self.browsers[browser_name]
+                if browser.is_connected():
+                    return browser
+                else:
+                    logger.warning(f"Browser {browser_name} is no longer connected, removing from cache")
+                    del self.browsers[browser_name]
             except Exception as e:
-                logger.warning(f"Could not launch {browser_name}: {e}")
-                # Try with minimal flags first
-                minimal_options = {
-                    'headless': True,
-                    'args': ['--no-sandbox', '--disable-dev-shm-usage']
-                }
-                try:
-                    self.browsers[browser_name] = await browser_engine.launch(**minimal_options)
-                    logger.info(f"Successfully launched {browser_name} with minimal options")
-                except Exception as e2:
-                    logger.error(f"Launch failed for {browser_name} even with minimal options: {e2}")
-                    raise
+                logger.warning(f"Browser {browser_name} health check failed: {e}, removing from cache")
+                if browser_name in self.browsers:
+                    del self.browsers[browser_name]
+        
+        # Launch new browser if not in cache or if previous one failed
+        if self.playwright is None:
+            raise RuntimeError("Playwright not initialized")
+            
+        browser_map = {
+            'Chrome': self.playwright.chromium,
+            'Firefox': self.playwright.firefox,
+            'Safari': self.playwright.webkit,
+            'Edge': self.playwright.chromium  # Edge uses Chromium engine
+        }
+        
+        if browser_name not in browser_map:
+            raise ValueError(f"Unsupported browser: {browser_name}")
+        
+        browser_engine = browser_map[browser_name]
+        
+        # Browser launch options - optimized for speed
+        launch_options = {
+            'headless': True,
+            'args': [
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-extensions',
+                '--disable-plugins',
+                '--no-first-run',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-software-rasterizer',
+                '--disable-background-networking',
+                '--disable-default-apps',
+                '--disable-sync',
+                '--disable-ipc-flooding-protection',
+                '--disable-xvfb',
+                '--disable-web-security',
+                '--disable-features=TranslateUI',
+                '--disable-ipc-flooding-protection',
+                '--disable-hang-monitor',
+                '--disable-prompt-on-repost',
+                '--disable-domain-reliability',
+                '--disable-component-extensions-with-background-pages'
+            ]
+        }
+        
+        # Special handling for Edge
+        if browser_name == 'Edge':
+            launch_options['channel'] = 'msedge'
+        
+        # WSL + Windows browser integration
+        if self.is_wsl and self.windows_browser_paths:
+            windows_path = self._get_windows_browser_path(browser_name)
+            if windows_path:
+                launch_options['executable_path'] = windows_path
+                logger.info(f"Using Windows browser: {windows_path}")
+        
+        try:
+            self.browsers[browser_name] = await browser_engine.launch(**launch_options)
+            logger.info(f"Successfully launched {browser_name}")
+        except Exception as e:
+            logger.warning(f"Could not launch {browser_name}: {e}")
+            # Try with minimal flags first
+            minimal_options = {
+                'headless': True,
+                'args': ['--no-sandbox', '--disable-dev-shm-usage']
+            }
+            try:
+                self.browsers[browser_name] = await browser_engine.launch(**minimal_options)
+                logger.info(f"Successfully launched {browser_name} with minimal options")
+            except Exception as e2:
+                logger.error(f"Launch failed for {browser_name} even with minimal options: {e2}")
+                raise
         
         return self.browsers[browser_name]
     
-    async def create_context(self, browser, viewport, device_name=None, user_agent=None, browser_name=None):
+    async def create_context(self, browser, viewport, device_name=None, user_agent=None, browser_name=None, region=None):
         """Create a browser context with viewport and optional device emulation."""
         context_options = {
             'ignore_https_errors': True,
@@ -230,6 +249,26 @@ class BrowserManager:
 
         if user_agent:
             context_options['user_agent'] = user_agent
+        
+        # Add simple locale support (geo-location proxy removed)
+        if region:
+            from config import REGIONS
+            region_config = REGIONS.get(region)
+            if region_config:
+                try:
+                    # Set only locale and timezone - simple approach
+                    context_options['locale'] = region_config.get('locale', 'en-US')
+                    context_options['timezone_id'] = region_config.get('timezone', 'UTC')
+                    
+                    # Set accept language header
+                    context_options['extra_http_headers'] = {
+                        'Accept-Language': region_config.get('accept_language', 'en-US,en;q=0.9')
+                    }
+                    
+                    logger.info(f"Applied simple locale settings for {region}: locale={region_config.get('locale', 'en-US')}, timezone={region_config.get('timezone', 'UTC')}")
+                except Exception as e:
+                    logger.warning(f"Error applying locale settings for {region}: {e}")
+                    # Continue without locale settings if they fail
 
         # Firefox does not support some mobile emulation context options
         if (browser_name or '').lower() == 'firefox':
@@ -254,72 +293,118 @@ class BrowserManager:
 
         return await browser.new_context(**context_options)
     
-    async def take_screenshot(self, url, browser_name, viewport, wait_time=3, device_name=None, return_metrics=False):
+    async def take_screenshot(self, url, browser_name, viewport, wait_time=3, device_name=None, return_metrics=False, region=None, max_retries=3):
         """Take a full-page screenshot and optionally return runtime metrics."""
         context = None
-        try:
-            browser = await self.get_browser(browser_name)
-            if not browser:
-                return None
-            context = await self.create_context(browser, viewport, device_name=device_name, browser_name=browser_name)
-            page = await context.new_page()
-            
-            # Navigate to URL with optimized timeout
+        last_error = None
+        
+        for attempt in range(max_retries):
             try:
-                await page.goto(url, wait_until='domcontentloaded', timeout=15000)
-            except Exception:
-                # Fallback to load if domcontentloaded fails
-                await page.goto(url, wait_until='load', timeout=15000)
-
-            # Quick font loading check (non-blocking)
-            try:
-                await page.evaluate("(async () => { if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch(e) {} } return true; })()")
-            except Exception:
-                pass
+                logger.info(f"Starting screenshot for {url} with region: {region} (attempt {attempt + 1}/{max_retries})")
+                browser = await self.get_browser(browser_name)
+                if not browser:
+                    logger.error(f"Failed to get browser: {browser_name}")
+                    return None
+                context = await self.create_context(browser, viewport, device_name=device_name, browser_name=browser_name, region=region)
+                page = await context.new_page()
             
-            # Additional wait time for dynamic content
-            await asyncio.sleep(wait_time)
-            
-            # Remove any modal dialogs or cookie banners (common issue)
-            await self.handle_common_overlays(page)
-            
-            # Capture runtime viewport metrics
-            metrics = None
-            try:
-                metrics = await page.evaluate("() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio, userAgent: navigator.userAgent, screen: { width: window.screen.width, height: window.screen.height } })")
-            except Exception:
-                metrics = None
-
-            # Take high-quality full page screenshot with better settings
-            screenshot_bytes = await page.screenshot(
-                full_page=True, 
-                type='png',
-                animations='disabled',  # Disable animations for consistent screenshots
-                caret='hide'  # Hide text cursor
-            )
-            
-            # Convert to PIL Image and enhance quality
-            image = Image.open(io.BytesIO(screenshot_bytes))
-            
-            # Log screenshot dimensions for debugging
-            logger.info(f"Screenshot captured: {image.size[0]}x{image.size[1]} for {url} on {browser_name} {device_name}")
-            
-            # Enhance image quality without forcing dimensions
-            image = self._enhance_screenshot_quality(image, viewport)
-            
-            await context.close()
-            if return_metrics:
-                return image, (metrics or {})
-            return image
-            
-        except Exception as e:
-            logger.error(f"Error taking screenshot of {url} with {browser_name}: {e}")
-            if context is not None:
+                # Simple locale injection (geo-location proxy removed)
+                if region:
+                    from config import REGIONS
+                    region_config = REGIONS.get(region, {})
+                    locale = region_config.get('locale', 'en-US')
+                    
+                    # Simple language override only
+                    await page.add_init_script(f"""
+                        // Simple language override
+                        Object.defineProperty(navigator, 'language', {{
+                            get: function() {{ return '{locale}'; }}
+                        }});
+                    """)
+                
+                # Navigate to URL with optimized timeout
                 try:
-                    await context.close()
+                    await page.goto(url, wait_until='domcontentloaded', timeout=15000)
+                except Exception:
+                    # Fallback to load if domcontentloaded fails
+                    await page.goto(url, wait_until='load', timeout=15000)
+
+                # Quick font loading check (non-blocking)
+                try:
+                    await page.evaluate("(async () => { if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch(e) {} } return true; })()")
                 except Exception:
                     pass
-            return None
+                
+                # Additional wait time for dynamic content
+                await asyncio.sleep(wait_time)
+                
+                # Remove any modal dialogs or cookie banners (common issue)
+                await self.handle_common_overlays(page)
+                
+                # Capture runtime viewport metrics
+                metrics = None
+                try:
+                    metrics = await page.evaluate("() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio, userAgent: navigator.userAgent, screen: { width: window.screen.width, height: window.screen.height } })")
+                except Exception:
+                    metrics = None
+
+                # Take high-quality full page screenshot with better settings
+                screenshot_bytes = await page.screenshot(
+                    full_page=True, 
+                    type='png',
+                    animations='disabled',  # Disable animations for consistent screenshots
+                    caret='hide'  # Hide text cursor
+                )
+                
+                # Convert to PIL Image and enhance quality
+                image = Image.open(io.BytesIO(screenshot_bytes))
+                
+                # Log screenshot dimensions for debugging
+                logger.info(f"Screenshot captured: {image.size[0]}x{image.size[1]} for {url} on {browser_name} {device_name}")
+                
+                # Enhance image quality without forcing dimensions
+                image = self._enhance_screenshot_quality(image, viewport)
+                
+                await context.close()
+                if return_metrics:
+                    return image, (metrics or {})
+                return image
+                
+            except Exception as e:
+                last_error = e
+                error_type = type(e).__name__
+                logger.error(f"Error taking screenshot of {url} with {browser_name} (region: {region}) on attempt {attempt + 1}: {e}")
+                logger.error(f"Error type: {error_type}")
+                
+                # Clean up context on error
+                if context is not None:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+                    context = None
+                
+                # Check if this is a TargetClosedError and we should retry
+                if error_type == 'TargetClosedError' and attempt < max_retries - 1:
+                    logger.warning(f"Browser context was closed, retrying in 2 seconds... (attempt {attempt + 1}/{max_retries})")
+                    # Force browser recreation on next attempt
+                    if browser_name in self.browsers:
+                        try:
+                            await self.browsers[browser_name].close()
+                        except Exception:
+                            pass
+                        del self.browsers[browser_name]
+                    await asyncio.sleep(2)  # Wait before retry
+                    continue
+                else:
+                    # Log full traceback for non-retryable errors or final attempt
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    break
+        
+        # If we get here, all retries failed
+        logger.error(f"Failed to take screenshot after {max_retries} attempts. Last error: {last_error}")
+        return None
     
     def _enhance_screenshot_quality(self, image, viewport):
         """Enhance screenshot quality without forcing dimensions."""

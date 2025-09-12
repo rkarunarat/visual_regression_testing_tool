@@ -28,6 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress Streamlit warnings about missing ScriptRunContext in threads
+import warnings
+warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
+
 # Graceful imports with fallbacks
 try:
     from browser_manager import BrowserManager
@@ -195,6 +199,20 @@ def main():
                 default=["Desktop", "Mobile"],
                 help="Choose device types for testing"
             )
+            
+            # Region selection
+            from config import REGIONS
+            selected_region = st.selectbox(
+                "🌍 Select Region",
+                options=["Default"] + list(REGIONS.keys()),
+                format_func=lambda x: "Default (No region)" if x == "Default" else f"{REGIONS[x]['name']} ({x})",
+                help="Choose region for geo-specific testing (affects locale, timezone, and language headers)"
+            )
+            
+            # Show region details if selected
+            if selected_region != "Default":
+                region_info = REGIONS[selected_region]
+                st.info(f"**{region_info['name']}** - Timezone: {region_info['timezone']}, Locale: {region_info['locale']}")
             st.subheader("🎯 Comparison Settings")
             similarity_threshold = st.slider(
                 "Similarity Threshold (%)",
@@ -213,7 +231,7 @@ def main():
         # Tabs for the main workflow
         tab1, tab2, tab3 = st.tabs(["URL Configuration", "Test Results", "Detailed Comparison"])
         with tab1:
-            configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time)
+            configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time, selected_region)
         with tab2:
             display_results_tab()
         with tab3:
@@ -254,7 +272,7 @@ def _load_image_from_result(record, key):
         return None
     return None
 
-def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time):
+def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time, selected_region):
     """Collect URL pairs and handle kicking off a test run."""
     st.header("URL Configuration")
     
@@ -362,7 +380,7 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
     if st.session_state.test_running and not st.session_state.get('tests_started', False):
         st.session_state.tests_started = True
         st.info("⏳ Starting visual regression tests...")
-        run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time)
+        run_tests(url_pairs, selected_browsers, selected_devices, similarity_threshold, wait_time, selected_region)
         st.session_state.tests_started = False
     elif st.session_state.test_running:
         st.info("⏳ Test is currently running...")
@@ -397,10 +415,14 @@ def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold
                     st.session_state.banner_message = f"Error loading partial results: {e}"
                     st.session_state.banner_type = "error"
                 finally:
+                    # Reset test states but keep results
                     st.session_state.cleanup_needed = False
+                    st.session_state.test_running = False
+                    st.session_state.tests_started = False
+                    st.session_state.stop_testing = False
                     st.rerun()
 
-def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
+def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time, selected_region):
     """Execute the selected test matrix and persist results incrementally."""
     # State already set in UI, just continue
     
@@ -496,7 +518,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 # Submit all tasks
                 future_to_task = {
-                    executor.submit(run_single_test_sync, url_pair, browser, device, similarity_threshold, wait_time): (url_pair, browser, device)
+                    executor.submit(run_single_test_sync, url_pair, browser, device, similarity_threshold, wait_time, selected_region): (url_pair, browser, device)
                     for url_pair, browser, device in test_tasks
                 }
                 
@@ -507,9 +529,11 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                         logger.info("🛑 Tests stopped by user")
                         status_text.text("🛑 Tests stopped by user")
                         st.session_state.test_running = False
+                        st.session_state.tests_started = False
                         # Cancel remaining tasks
                         for f in future_to_task:
-                            f.cancel()
+                            if not f.done():
+                                f.cancel()
                         return
                     
                     url_pair, browser, device = future_to_task[future]
@@ -554,6 +578,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                                 'is_match': False,
                                 'is_skipped': True,
                                 'skip_reason': 'Screenshot capture failed or test execution error',
+                                'region': selected_region if selected_region != "Default" else None,
                                 'staging_screenshot': None,
                                 'production_screenshot': None,
                                 'diff_image': None,
@@ -592,6 +617,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                             logger.info("🛑 Tests stopped by user")
                             status_text.text("🛑 Tests stopped by user")
                             st.session_state.test_running = False
+                            st.session_state.tests_started = False
                             return
                         
                         current_test += 1
@@ -613,7 +639,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                         
                         # Run the actual test
                         result = asyncio.run(
-                            run_single_test(url_pair, browser, device, similarity_threshold, wait_time)
+                            run_single_test(url_pair, browser, device, similarity_threshold, wait_time, selected_region)
                         )
                         
                         if result:
@@ -638,6 +664,7 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
                                 'is_match': False,
                                 'is_skipped': True,
                                 'skip_reason': 'Screenshot capture failed or test execution error',
+                                'region': selected_region if selected_region != "Default" else None,
                                 'staging_screenshot': None,
                                 'production_screenshot': None,
                                 'diff_image': None,
@@ -703,21 +730,31 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time):
         
         # Don't clear progress indicators immediately, let user see final state
 
-async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time):
+async def run_single_test(url_pair, browser, device, similarity_threshold, wait_time, selected_region):
     """Run one test case and return a result record with images/metrics."""
+    browser_manager = None
     try:
+        # Check if tests should be stopped before starting
+        if st.session_state.get('stop_testing', False):
+            logger.info(f"Test {url_pair['name']} ({browser}, {device}) skipped - tests stopped by user")
+            return None
+            
         # Use a fresh BrowserManager per test to avoid cross-loop transport issues
+        # This ensures each thread has its own browser instances
         browser_manager = BrowserManager()
         
         # Get viewport configuration
         viewport = VIEWPORT_CONFIGS[device]
         
         # Take screenshots
+        region = selected_region if selected_region != "Default" else None
+        logger.info(f"Taking screenshots for {url_pair['name']} with region: {region}")
+        
         staging_capture = await browser_manager.take_screenshot(
-            url_pair['staging_url'], browser, viewport, wait_time, device_name=device, return_metrics=True
+            url_pair['staging_url'], browser, viewport, wait_time, device_name=device, return_metrics=True, region=region
         )
         production_capture = await browser_manager.take_screenshot(
-            url_pair['production_url'], browser, viewport, wait_time, device_name=device, return_metrics=True
+            url_pair['production_url'], browser, viewport, wait_time, device_name=device, return_metrics=True, region=region
         )
 
         # Unpack images and metrics
@@ -725,6 +762,7 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
         production_screenshot, production_metrics = production_capture if isinstance(production_capture, tuple) else (production_capture, {})
         
         if not staging_screenshot or not production_screenshot:
+            logger.warning(f"Failed to capture screenshots for {url_pair['name']} ({browser}, {device})")
             return None
         
         # Compare images
@@ -750,23 +788,29 @@ async def run_single_test(url_pair, browser, device, similarity_threshold, wait_
             'viewport_width': viewport.get('width'),
             'viewport_height': viewport.get('height'),
             'staging_runtime_metrics': staging_metrics,
-            'production_runtime_metrics': production_metrics
+            'production_runtime_metrics': production_metrics,
+            'region': selected_region if selected_region != "Default" else None
         }
         
+        logger.info(f"Successfully completed test {url_pair['name']} ({browser}, {device}) - Similarity: {comparison_result['similarity_score']:.2f}%")
         return result
         
     except Exception as e:
-        st.error(f"Error in test {url_pair['name']} ({browser}, {device}): {str(e)}")
+        logger.error(f"Error in test {url_pair['name']} ({browser}, {device}): {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return None
     finally:
-        try:
-            await browser_manager.cleanup()
-        except Exception:
-            pass
+        if browser_manager is not None:
+            try:
+                await browser_manager.cleanup()
+            except Exception as cleanup_error:
+                logger.warning(f"Error during browser cleanup: {cleanup_error}")
+                pass
 
-def run_single_test_sync(url_pair, browser, device, similarity_threshold, wait_time):
+def run_single_test_sync(url_pair, browser, device, similarity_threshold, wait_time, selected_region):
     """Synchronous wrapper for run_single_test to use with ThreadPoolExecutor."""
-    return asyncio.run(run_single_test(url_pair, browser, device, similarity_threshold, wait_time))
+    return asyncio.run(run_single_test(url_pair, browser, device, similarity_threshold, wait_time, selected_region))
 
 def should_use_parallel_processing():
     """Determine if parallel processing should be used based on system capabilities."""
@@ -840,8 +884,9 @@ def get_optimal_worker_count():
         return 1
     
     cpu_count = os.cpu_count() or 1
-    # Use up to 6 workers for better performance on modern systems
-    return min(6, max(2, cpu_count))
+    # Use fewer workers to reduce browser conflicts and improve stability
+    # Start with 2 workers and cap at 3 for better browser management
+    return min(3, max(2, cpu_count // 2))
 
 def display_results_tab():
     """Show aggregate metrics and a filterable table of results."""
@@ -1118,6 +1163,12 @@ def cleanup_partial_results():
             result_manager.delete_test_run(st.session_state.current_test_id)
             st.session_state.current_test_id = None
             st.session_state.test_results = []
+        
+        # Reset all test-related states
+        st.session_state.test_running = False
+        st.session_state.tests_started = False
+        st.session_state.stop_testing = False
+        st.session_state.cleanup_needed = False
     except Exception as e:
         st.error(f"Error cleaning up partial results: {e}")
 

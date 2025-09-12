@@ -135,7 +135,7 @@ def test_imports():
 def test_configuration_data():
     """Test 2: Verify configuration data is intact"""
     try:
-        from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP
+        from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP, REGIONS
         
         # Check browsers
         if not BROWSERS or 'Chrome' not in BROWSERS:
@@ -152,10 +152,30 @@ def test_configuration_data():
             print_error("Viewport configurations missing or invalid")
             return False
         
+        # Check regions
+        if not REGIONS or 'USA' not in REGIONS:
+            print_error("Regions configuration missing or invalid")
+            return False
+        
+        # Verify region structure
+        for region_key, region_data in REGIONS.items():
+            required_keys = ['name', 'timezone', 'locale', 'user_agent_suffix', 'accept_language', 'geo_location', 'country_code', 'region_code']
+            for key in required_keys:
+                if key not in region_data:
+                    print_error(f"Region {region_key} missing required key: {key}")
+                    return False
+            
+            # Verify geo-location structure
+            geo_location = region_data.get('geo_location', {})
+            if 'latitude' not in geo_location or 'longitude' not in geo_location:
+                print_error(f"Region {region_key} geo_location missing latitude/longitude")
+                return False
+        
         print_info(f"Browsers: {list(BROWSERS.keys())}")
         print_info(f"Devices: {list(DEVICES.keys())}")
         print_info(f"Viewport configs: {len(VIEWPORT_CONFIGS)} entries")
         print_info(f"Device mappings: {len(PLAYWRIGHT_DEVICE_MAP)} entries")
+        print_info(f"Regions: {list(REGIONS.keys())}")
         
         return True
     except Exception as e:
@@ -438,6 +458,147 @@ def test_pdf_generation():
         print_error(f"PDF generation test failed: {e}")
         return False
 
+def test_region_functionality():
+    """Test 13: Verify region functionality is properly implemented"""
+    try:
+        with open('app.py', 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Check for region selection in UI
+        if 'Select Region' not in content:
+            print_error("Region selection UI missing")
+            return False
+        
+        # Check for region parameter in function signatures
+        if 'selected_region' not in content:
+            print_error("Region parameter not found in app functions")
+            return False
+        
+        # Check for region handling in test execution
+        if 'region = selected_region if selected_region != "Default" else None' not in content:
+            print_error("Region parameter handling missing")
+            return False
+        
+        # Check for region info display
+        if 'region_info = REGIONS[selected_region]' not in content:
+            print_error("Region info display missing")
+            return False
+        
+        # Check for region in result storage
+        if "'region': selected_region if selected_region != \"Default\" else None" not in content:
+            print_error("Region not stored in test results")
+            return False
+        
+        print_info("Region functionality is properly implemented")
+        return True
+    except Exception as e:
+        print_error(f"Region functionality test failed: {e}")
+        return False
+
+def test_browser_automation_regions():
+    """Test 14: Verify browser automation supports regions"""
+    try:
+        with open('browser_automation.py', 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Check for region parameter in function signatures
+        if 'region=None' not in content:
+            print_error("Region parameter missing in browser automation functions")
+            return False
+        
+        # Check for region configuration handling
+        if 'region_config = REGIONS.get(region)' not in content:
+            print_error("Region configuration handling missing")
+            return False
+        
+        # Check for region-specific context options
+        if 'context_options[\'locale\'] = region_config[\'locale\']' not in content:
+            print_error("Region locale setting missing")
+            return False
+        
+        if 'context_options[\'timezone_id\'] = region_config[\'timezone\']' not in content:
+            print_error("Region timezone setting missing")
+            return False
+        
+        # Check for accept language header
+        if 'Accept-Language' not in content:
+            print_error("Accept-Language header setting missing")
+            return False
+        
+        print_info("Browser automation region support is properly implemented")
+        return True
+    except Exception as e:
+        print_error(f"Browser automation regions test failed: {e}")
+        return False
+
+def test_default_region_behavior():
+    """Test 15: Verify default region behavior works correctly"""
+    try:
+        with open('app.py', 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Check for default region handling
+        if 'selected_region != "Default"' not in content:
+            print_error("Default region handling missing")
+            return False
+        
+        # Check that region is set to None when Default is selected
+        if 'region = selected_region if selected_region != "Default" else None' not in content:
+            print_error("Default region nullification missing")
+            return False
+        
+        # Check that region info is only shown when not default
+        if 'if selected_region != "Default":' not in content:
+            print_error("Default region UI handling missing")
+            return False
+        
+        print_info("Default region behavior is properly implemented")
+        return True
+    except Exception as e:
+        print_error(f"Default region behavior test failed: {e}")
+        return False
+
+def test_enhanced_geo_location():
+    """Test 16: Verify enhanced geo-location functionality"""
+    try:
+        with open('browser_automation.py', 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Check for geo-location context options
+        if 'context_options[\'geolocation\']' not in content:
+            print_error("Geo-location context option missing")
+            return False
+        
+        # Check for permissions setting
+        if 'context_options[\'permissions\']' not in content:
+            print_error("Geo-location permissions missing")
+            return False
+        
+        # Check for additional headers
+        if 'X-Country-Code' not in content:
+            print_error("Country code header missing")
+            return False
+        
+        if 'X-Region-Code' not in content:
+            print_error("Region code header missing")
+            return False
+        
+        # Check for JavaScript geo-location override
+        if 'navigator.geolocation.getCurrentPosition' not in content:
+            print_error("JavaScript geo-location override missing")
+            return False
+        
+        # Check for language override
+        if 'Object.defineProperty(navigator, \'language\'' not in content:
+            print_error("Language override missing")
+            return False
+        
+        print_info("Enhanced geo-location functionality is properly implemented")
+        return True
+    except Exception as e:
+        print_error(f"Enhanced geo-location test failed: {e}")
+        return False
+
 def main():
     """Run the complete test suite"""
     print_header("VISUAL REGRESSION TESTING TOOL - FUNCTIONALITY TEST SUITE")
@@ -471,6 +632,12 @@ def main():
     test_suite.run_test("Playwright Setup", test_playwright_setup)
     test_suite.run_test("PDF Generation", test_pdf_generation)
     
+    # Region functionality tests
+    test_suite.run_test("Region Functionality", test_region_functionality)
+    test_suite.run_test("Browser Automation Regions", test_browser_automation_regions)
+    test_suite.run_test("Default Region Behavior", test_default_region_behavior)
+    test_suite.run_test("Enhanced Geo-Location", test_enhanced_geo_location)
+    
     # Deployment tests
     test_suite.run_test("Deployment Files", test_deployment_files)
     test_suite.run_test("Requirements File", test_requirements_file)
@@ -483,7 +650,7 @@ def main():
         print_success("All tests passed! You can safely push to repository.")
         print_info("Next steps:")
         print("  1. git add .")
-        print("  2. git commit -m 'Add comprehensive deployment and fix session state issues'")
+        print("  2. git commit -m 'Add enhanced region-specific testing with geo-location emulation'")
         print("  3. git push")
         return 0
     else:
