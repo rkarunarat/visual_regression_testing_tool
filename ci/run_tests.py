@@ -54,6 +54,34 @@ def _config_from_env() -> dict | None:
     }
 
 
+def _apply_env_overrides(config: dict) -> dict:
+    """Apply optional TEST_NAME, BROWSER, and DEVICE env overrides from workflow inputs."""
+    test_name = os.environ.get('TEST_NAME', '').strip()
+    browser = os.environ.get('BROWSER', '').strip()
+    device = os.environ.get('DEVICE', '').strip()
+
+    if browser:
+        config['browsers'] = [browser]
+        logger.info("Using browser override from env: %s", browser)
+
+    if device:
+        config['devices'] = [device]
+        logger.info("Using device override from env: %s", device)
+
+    if test_name:
+        url_pairs = config.get('url_pairs') or []
+        if len(url_pairs) == 1:
+            url_pairs[0]['name'] = test_name
+            logger.info("Using test name override from env: %s", test_name)
+        elif len(url_pairs) > 1:
+            logger.warning(
+                "TEST_NAME override ignored because config has %s URL pairs.",
+                len(url_pairs),
+            )
+
+    return config
+
+
 def _validate_config(config: dict):
     if not config.get('url_pairs'):
         raise ValueError("Config must include at least one url_pair")
@@ -131,6 +159,7 @@ def main():
                 )
                 return 2
 
+        config = _apply_env_overrides(config)
         _validate_config(config)
 
         run_id = os.environ.get('RUN_ID') or f"ci_{datetime.now().strftime('%Y%m%d_%H%M%S')}"

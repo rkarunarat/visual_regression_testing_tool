@@ -14,6 +14,35 @@ on:
         description: Path to JSON config inside the repo
         required: false
         default: ci/config.example.json
+      test_name:
+        description: 'Optional test label (overrides config when one URL pair; default CI Test for secrets-only runs)'
+        required: false
+        type: string
+        default: ''
+      browser:
+        description: Optional browser override
+        required: false
+        type: choice
+        default: Default
+        options:
+          - Default
+          - Chrome
+          - Firefox
+          - Safari
+          - Edge
+      device:
+        description: Optional device override
+        required: false
+        type: choice
+        default: Default
+        options:
+          - Default
+          - Desktop
+          - 'Desktop Mac'
+          - Tablet
+          - Tablet Android
+          - Mobile
+          - Mobile Android
 
 permissions:
   contents: read
@@ -60,10 +89,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -84,6 +113,9 @@ jobs:
           STAGING_URL: ${{ secrets.STAGING_URL }}
           PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
           RUN_ID: gh-${{ github.run_id }}
+          TEST_NAME: ${{ github.event.inputs.test_name }}
+          BROWSER: ${{ github.event.inputs.browser != 'Default' && github.event.inputs.browser || '' }}
+          DEVICE: ${{ github.event.inputs.device != 'Default' && github.event.inputs.device || '' }}
         run: |
           set +e
           CONFIG="${{ github.event.inputs.config_path || 'ci/config.example.json' }}"
@@ -124,7 +156,7 @@ jobs:
 
       - name: Upload report artifacts
         if: always() && hashFiles('artifacts/manifest.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-regression-report-${{ github.run_id }}
           path: artifacts/
