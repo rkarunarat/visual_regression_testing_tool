@@ -1,0 +1,15 @@
+{
+  "url_pairs": [
+    {
+      "name": "Homepage",
+      "staging_url": "https://staging.example.com",
+      "production_url": "https://www.example.com"
+    }
+  ],
+  "browsers": ["Chrome"],
+  "devices": ["Desktop"],
+  "similarity_threshold": 95,
+  "wait_time": 3,
+  "region": "Default",
+  "fail_on_regression": false
+}

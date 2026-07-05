@@ -1,20 +1,12 @@
 """Export results to ZIP and generate PDF reports."""
-from datetime import datetime
 from io import BytesIO
 import zipfile
 
 import streamlit as st
 
-from ui.deps import (
-    A4,
-    ImageComparator,
-    ImageReader,
-    PDF_OK,
-    ResultManager,
-    canvas,
-    cm,
-)
-from utils import safe_results_path, sanitize_filename
+from reports.generator import build_report_filename, generate_pdf_report
+from ui.deps import PDF_OK, ResultManager
+from utils import safe_results_path
 
 
 def export_selected_runs(run_ids, result_manager):
@@ -114,19 +106,11 @@ def export_results(df):
 
 def build_pdf_filename(summary_only=True):
     """Build a sanitized PDF filename from current session results."""
-    results = st.session_state.get('test_results', [])
-    total = len(results)
-    passed = sum(1 for r in results if r.get('is_match'))
-    failed = total - passed
-    pass_rate = (passed / total * 100) if total > 0 else 0
-    test_id = st.session_state.get('current_test_id') or 'run'
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    kind = 'summary' if summary_only else 'full'
-    base = (
-        f"VisualDiff_{test_id}_{total}tests_{passed}pass_{failed}fail_"
-        f"{pass_rate:.0f}pr_{ts}_{kind}.pdf"
+    return build_report_filename(
+        st.session_state.get('test_results', []),
+        st.session_state.get('current_test_id') or 'run',
+        summary_only=summary_only,
     )
-    return sanitize_filename(base)
 
 
 def generate_pdf(summary_only=True):
@@ -135,202 +119,12 @@ def generate_pdf(summary_only=True):
         st.error("PDF generation is not available due to missing dependencies.")
         return b""
     try:
-        buffer = BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4)
-        width, height = A4
-        margin = 2 * cm
-        y = height - margin
-
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(margin, y, "Visual Regression Report")
-        y -= 1.2 * cm
-        c.setFont("Helvetica", 10)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        c.drawString(margin, y, f"Generated: {now}")
-        y -= 0.7 * cm
-
-        results = st.session_state.get('test_results', [])
-        total = len(results)
-        passed = sum(1 for r in results if r.get('is_match'))
-        failed = total - passed
-        pass_rate = (passed / total * 100) if total > 0 else 0
-        avg_similarity = (sum(r.get('similarity_score', 0) for r in results) / total) if total > 0 else 0
-        browsers = sorted({r.get('browser', 'Unknown') for r in results})
-        devices = sorted({r.get('device', 'Unknown') for r in results})
-        run_id = st.session_state.get('current_test_id') or 'N/A'
-
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(margin, y, "Executive Summary")
-        y -= 0.8 * cm
-
-        c.setFont("Helvetica", 10)
-
-        def draw_kv(label, value):
-            nonlocal y
-            c.drawString(margin, y, f"{label}:")
-            c.drawString(margin + 4.5 * cm, y, str(value))
-            y -= 0.6 * cm
-
-        draw_kv("Run ID", run_id)
-        draw_kv("Total Tests", total)
-        draw_kv("Passed", passed)
-        draw_kv("Failed", failed)
-        draw_kv("Pass Rate", f"{pass_rate:.1f}%")
-        draw_kv("Average Similarity", f"{avg_similarity:.1f}%")
-        draw_kv("Browsers", ", ".join(browsers) if browsers else "-")
-        draw_kv("Devices", ", ".join(devices) if devices else "-")
-
-        y -= 0.2 * cm
-        c.line(margin, y, width - margin, y)
-        y -= 0.6 * cm
-
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(margin, y, "Tests (name | browser | device | score | status)")
-        y -= 0.7 * cm
-        c.setFont("Helvetica", 9)
-        for r in results:
-            line = (
-                f"{r['test_name']} | {r['browser']} | {r['device']} | "
-                f"{r['similarity_score']:.1f}% | {'PASS' if r['is_match'] else 'FAIL'}"
-            )
-            c.drawString(margin, y, line[:170])
-            y -= 0.55 * cm
-            if y < margin + 1.5 * cm:
-                c.showPage()
-                y = height - margin
-                c.setFont("Helvetica", 9)
-
-        c.showPage()
-
-        if summary_only:
-            y = height - margin
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(margin, y, "Summary Details")
-            y -= 0.9 * cm
-            c.setFont("Helvetica", 9)
-            for r in results:
-                line = (
-                    f"{r['test_name']} | {r['browser']} | {r['device']} | "
-                    f"{r['similarity_score']:.1f}% | {'PASS' if r['is_match'] else 'FAIL'}"
-                )
-                c.drawString(margin, y, line[:170])
-                y -= 0.55 * cm
-                if y < margin + 1.0 * cm:
-                    c.showPage()
-                    y = height - margin
-                    c.setFont("Helvetica", 9)
-        else:
-            from PIL import Image as PILImage
-
-            def _load_img(record, which):
-                img = record.get(which)
-                if img is not None:
-                    return img
-                path_key = (
-                    'staging' if which == 'staging_screenshot'
-                    else 'production' if which == 'production_screenshot'
-                    else 'diff'
-                )
-                p = record.get('screenshot_paths', {}).get(path_key)
-                if p:
-                    fp = safe_results_path(ResultManager().results_dir, p)
-                    try:
-                        if fp and fp.exists():
-                            return PILImage.open(fp)
-                    except Exception:
-                        return None
-                return None
-
-            def draw_img_jpeg(pil_img, x, y_pos, max_w, max_h, quality=70):
-                if not pil_img:
-                    return y_pos
-                try:
-                    img = pil_img.convert('RGB')
-                    iw, ih = img.size
-                    scale = min(max_w / iw, max_h / ih, 1.0)
-                    dw, dh = int(iw * scale), int(ih * scale)
-                    if scale < 1.0:
-                        img = img.resize((dw, dh), PILImage.Resampling.LANCZOS)
-                    buf = BytesIO()
-                    img.save(buf, format='JPEG', quality=quality, optimize=True)
-                    buf.seek(0)
-                    ir = ImageReader(buf)
-                    c.drawImage(ir, x, y_pos - dh, width=dw, height=dh, preserveAspectRatio=True, mask='auto')
-                    return y_pos - dh - 0.5 * cm
-                except Exception:
-                    return y_pos
-
-            comparator = ImageComparator()
-            for idx, r in enumerate(results, 1):
-                if idx > 1:
-                    c.showPage()
-                y = height - margin
-                c.setFont("Helvetica-Bold", 12)
-                title = f"{idx}. {r['test_name']} - {r['browser']} ({r['device']})"
-                c.drawString(margin, y, title)
-                y -= 0.7 * cm
-                c.setFont("Helvetica", 9)
-                meta = (
-                    f"Similarity: {r['similarity_score']:.1f}% | "
-                    f"Status: {'PASS' if r['is_match'] else 'FAIL'}"
-                )
-                c.drawString(margin, y, meta)
-                y -= 0.5 * cm
-
-                staging_img = _load_img(r, 'staging_screenshot')
-                production_img = _load_img(r, 'production_screenshot')
-                diff_img = r.get('diff_image') or _load_img(r, 'diff_image')
-
-                try:
-                    is_mobile = 'mobile' in str(r.get('device', '')).lower()
-                    if is_mobile:
-                        vp_h = r.get('viewport_height') or 0
-                        crop_h = int(2.5 * vp_h) if vp_h else 2400
-
-                        def _crop_tall(img):
-                            if img is None:
-                                return None
-                            w, h = img.size
-                            if h > crop_h:
-                                return img.crop((0, 0, w, crop_h))
-                            return img
-
-                        staging_img = _crop_tall(staging_img)
-                        production_img = _crop_tall(production_img)
-                        diff_img = _crop_tall(diff_img)
-                except Exception:
-                    pass
-
-                overlay_img = None
-                try:
-                    if staging_img is not None and production_img is not None:
-                        overlay_img = comparator.create_overlay(staging_img, production_img, opacity=0.5)
-                except Exception:
-                    overlay_img = None
-
-                col_gap = 0.5 * cm
-                col_w = (width - 2 * margin - col_gap) / 2
-                row_h = (height - 5 * cm) / 3
-
-                y1 = y
-                y1 = draw_img_jpeg(staging_img, margin, y1, col_w, row_h)
-                y2 = y
-                y2 = draw_img_jpeg(production_img, margin + col_w + col_gap, y2, col_w, row_h)
-                y = min(y1, y2)
-
-                y = draw_img_jpeg(overlay_img, margin, y, width - 2 * margin, row_h, quality=65)
-                y = draw_img_jpeg(diff_img, margin, y, width - 2 * margin, row_h, quality=65)
-
-                c.setFont("Helvetica-Oblique", 8)
-                c.drawString(
-                    margin, y,
-                    "Guidance: In overlay, verify key regions align (header, nav, CTAs, forms). "
-                    "In diff, red shows changes.",
-                )
-
-        c.save()
-        buffer.seek(0)
-        return buffer.read()
+        return generate_pdf_report(
+            st.session_state.get('test_results', []),
+            st.session_state.get('current_test_id') or 'run',
+            summary_only=summary_only,
+            results_base=ResultManager().results_dir,
+        )
     except Exception as e:
         st.error(f"Error generating PDF: {e}")
         return b""

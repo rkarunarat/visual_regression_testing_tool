@@ -1,0 +1,138 @@
+name: Visual Regression Tests
+
+# Manual runs require WORKFLOW_RUN_PASSWORD (repo secret).
+# On public repos, only users with write access can trigger workflow_dispatch.
+# The password adds an extra gate for authorized team members who know the secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_password:
+        description: Run password (must match WORKFLOW_RUN_PASSWORD secret)
+        required: true
+        type: string
+      config_path:
+        description: Path to JSON config inside the repo
+        required: false
+        default: ci/config.example.json
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify manual run password
+        env:
+          EXPECTED_PASSWORD: ${{ secrets.WORKFLOW_RUN_PASSWORD }}
+          PROVIDED_PASSWORD: ${{ github.event.inputs.run_password }}
+        run: |
+          if [ -z "$EXPECTED_PASSWORD" ]; then
+            echo "::error::WORKFLOW_RUN_PASSWORD secret is not set. Configure it under Settings → Secrets → Actions to enable manual runs."
+            exit 1
+          fi
+          if [ -z "$PROVIDED_PASSWORD" ] || [ "$PROVIDED_PASSWORD" != "$EXPECTED_PASSWORD" ]; then
+            echo "::error::Invalid run password. Manual workflow runs are restricted."
+            exit 1
+          fi
+          echo "Manual run authorized."
+
+  visual-regression:
+    needs: authorize
+    if: needs.authorize.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Install Playwright browser
+        run: python -m playwright install chromium --with-deps
+
+      - name: Run visual regression tests
+        id: run_tests
+        env:
+          PLAYWRIGHT_USE_SYSTEM_BROWSER: 'false'
+          PLAYWRIGHT_HEADLESS: 'true'
+          IGNORE_HTTPS_ERRORS: 'true'
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          RUN_ID: gh-${{ github.run_id }}
+        run: |
+          set +e
+          CONFIG="${{ github.event.inputs.config_path || 'ci/config.example.json' }}"
+          if [ -f "$CONFIG" ]; then
+            python ci/run_tests.py --config "$CONFIG" --output-dir artifacts
+          elif [ -n "$STAGING_URL" ] && [ -n "$PRODUCTION_URL" ]; then
+            python ci/run_tests.py --output-dir artifacts
+          else
+            echo "::error::Misconfiguration: no config file ($CONFIG) and STAGING_URL/PRODUCTION_URL secrets are not set."
+            exit 2
+          fi
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          if [ "$EXIT_CODE" -eq 2 ] || [ "$EXIT_CODE" -eq 3 ]; then
+            if [ "$EXIT_CODE" -eq 2 ]; then
+              echo "::error::Misconfiguration detected (invalid/missing config)."
+            else
+              echo "::error::Unexpected runtime error during visual regression run."
+            fi
+            exit "$EXIT_CODE"
+          fi
+          exit 0
+
+      - name: Alert on visual regressions
+        if: success() && hashFiles('artifacts/manifest.json') != ''
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("artifacts/manifest.json").read_text(encoding="utf-8"))
+          failed = data.get("failed", 0)
+          skipped = data.get("skipped", 0)
+          if failed > 0:
+              print(f"::warning title=Visual regressions detected::{failed} test(s) failed visual comparison. Download artifacts for report-full.pdf and index.html.")
+          if skipped > 0:
+              print(f"::warning title=Skipped tests::{skipped} test(s) were skipped (screenshot capture or runtime issues).")
+          PY
+
+      - name: Upload report artifacts
+        if: always() && hashFiles('artifacts/manifest.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-report-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f artifacts/manifest.json ]; then
+            echo "## Visual Regression Summary" >> "$GITHUB_STEP_SUMMARY"
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          data = json.loads(Path("artifacts/manifest.json").read_text(encoding="utf-8"))
+          status = data.get("status", "ok")
+          status_note = "Issues found (non-blocking)" if status == "issues_found" else "All comparisons passed"
+          print(f"- Run ID: `{data['run_id']}`")
+          print(f"- Status: **{status_note}**")
+          print(f"- Total: **{data['total']}** | Passed: **{data['passed']}** | Failed: **{data['failed']}** | Skipped: **{data['skipped']}**")
+          print(f"- Artifacts: `{data['pdf']}`, `{data['html']}` (+ images/)")
+          PY
+          else
+            echo "No report artifacts were produced. Check logs for misconfiguration or runtime errors." >> "$GITHUB_STEP_SUMMARY"
+          fi

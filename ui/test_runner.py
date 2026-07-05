@@ -8,6 +8,7 @@ from datetime import datetime
 
 import streamlit as st
 
+from ui.session import request_nav
 from ui.deps import (
     BrowserManager,
     ImageComparator,
@@ -382,10 +383,6 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time, sel
                         f"({result['device']}) - {status} - {result['similarity_score']:.1f}%",
                     )
 
-            st.info(
-                "**Next Steps**: Switch to 'Test Results' or 'Detailed Comparison' tabs "
-                "to view full results and images",
-            )
             st.toast("Tests complete!", icon="🎉")
         else:
             st.warning("Tests completed but no results were generated. Please check your URLs and try again.")
@@ -395,3 +392,15 @@ def run_tests(url_pairs, browsers, devices, similarity_threshold, wait_time, sel
     finally:
         st.session_state.test_running = False
         st.session_state.tests_started = False
+        results = st.session_state.get('test_results') or []
+        if results and not st.session_state.get('stop_testing') and not st.session_state.get('cleanup_needed'):
+            passed = sum(1 for r in results if r.get('is_match') and not r.get('is_skipped', False))
+            failed = sum(1 for r in results if not r.get('is_match') and not r.get('is_skipped', False))
+            skipped = sum(1 for r in results if r.get('is_skipped', False))
+            request_nav("Results")
+            st.session_state.banner_message = (
+                f"Completed {len(results)} tests — {passed} passed, {failed} failed, "
+                f"{skipped} skipped. Review results below."
+            )
+            st.session_state.banner_type = "success"
+            st.rerun()

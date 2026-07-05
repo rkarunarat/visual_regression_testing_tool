@@ -4,15 +4,13 @@ import warnings
 
 import streamlit as st
 
-from config import REGIONS
 from ui.about_tab import about_tab
 from ui.auth import require_auth
-from ui.comparison_tab import detailed_comparison_tab
-from ui.config_tab import configure_urls_tab
-from ui.deps import BROWSERS, DEVICES, IMPORTS_OK
-from ui.manage_tab import manage_test_runs_tab
-from ui.results_tab import display_results_tab
-from ui.session import init_session_state
+from ui.deps import IMPORTS_OK
+from ui.history_page import history_page
+from ui.new_test_page import new_test_page
+from ui.results_page import results_page
+from ui.session import apply_nav_request, init_session_state, NAV_OPTIONS
 from ui.theme import (
     inject_global_styles,
     render_footer,
@@ -42,6 +40,7 @@ init_session_state()
 
 def main():
     """Render the Streamlit app and orchestrate navigation and actions."""
+    apply_nav_request()
     inject_global_styles()
 
     if not require_auth():
@@ -72,72 +71,26 @@ def main():
         sidebar_label("Navigation")
         nav = st.radio(
             "Navigation",
-            ["Run Tests", "Manage Test Runs", "About"],
-            index=0,
+            list(NAV_OPTIONS),
             key="nav",
             label_visibility="collapsed",
         )
 
-    if nav == "Run Tests":
-        with st.sidebar:
-            sidebar_divider()
-            sidebar_label("Test Configuration")
-            selected_browsers = st.multiselect(
-                "Browsers",
-                options=list(BROWSERS.keys()),
-                default=["Chrome"],
-                help="Choose browsers for testing",
-            )
-            selected_devices = st.multiselect(
-                "Devices",
-                options=list(DEVICES.keys()),
-                default=["Desktop", "Mobile"],
-                help="Choose device types for testing",
-            )
-            selected_region = st.selectbox(
-                "Region",
-                options=["Default"] + list(REGIONS.keys()),
-                format_func=lambda x: (
-                    "Default (No region)" if x == "Default" else f"{REGIONS[x]['name']} ({x})"
-                ),
-                help="Geo-specific locale, timezone, and language headers",
-            )
-            if selected_region != "Default":
-                region_info = REGIONS[selected_region]
-                st.caption(
-                    f"{region_info['name']} · {region_info['timezone']} · {region_info['locale']}"
-                )
+        sidebar_divider()
+        if st.button("About", use_container_width=True):
+            st.session_state.show_about = True
 
-            sidebar_divider()
-            sidebar_label("Comparison Settings")
-            similarity_threshold = st.slider(
-                "Similarity Threshold (%)",
-                min_value=50,
-                max_value=100,
-                value=95,
-                help="Minimum similarity percentage to consider images as matching",
-            )
-            wait_time = st.number_input(
-                "Page Load Wait (seconds)",
-                min_value=1,
-                max_value=30,
-                value=3,
-                help="Time to wait for page to fully load (recommended: 3s for slower sites)",
-            )
-
-        tab1, tab2, tab3 = st.tabs(["URL Configuration", "Test Results", "Detailed Comparison"])
-        with tab1:
-            configure_urls_tab(
-                selected_browsers, selected_devices, similarity_threshold, wait_time, selected_region,
-            )
-        with tab2:
-            display_results_tab()
-        with tab3:
-            detailed_comparison_tab()
-    elif nav == "Manage Test Runs":
-        manage_test_runs_tab()
-    elif nav == "About":
+    if st.session_state.get("show_about"):
         about_tab()
+        if st.button("Back to app"):
+            st.session_state.show_about = False
+            st.rerun()
+    elif nav == "New Test":
+        new_test_page()
+    elif nav == "Results":
+        results_page()
+    elif nav == "History":
+        history_page()
 
     render_footer()
 

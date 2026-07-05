@@ -10,6 +10,8 @@ from pathlib import Path
 import logging
 from typing import Dict, List, Any
 
+from utils import enrich_test_result
+
 logger = logging.getLogger(__name__)
 
 class ResultManager:
@@ -47,8 +49,21 @@ class ResultManager:
                 'similarity_score': float(result['similarity_score']),
                 'is_match': bool(result['is_match']),
                 'timestamp': str(result['timestamp']),
-                'screenshot_paths': screenshot_paths
+                'screenshot_paths': screenshot_paths,
             }
+
+            if result.get('device_model'):
+                result_metadata['device_model'] = str(result['device_model'])
+            if result.get('viewport_width') is not None:
+                result_metadata['viewport_width'] = int(result['viewport_width'])
+            if result.get('viewport_height') is not None:
+                result_metadata['viewport_height'] = int(result['viewport_height'])
+            if result.get('region'):
+                result_metadata['region'] = str(result['region'])
+            if result.get('staging_runtime_metrics'):
+                result_metadata['staging_runtime_metrics'] = result['staging_runtime_metrics']
+            if result.get('production_runtime_metrics'):
+                result_metadata['production_runtime_metrics'] = result['production_runtime_metrics']
             
             # Add skipped test metadata if applicable
             if result.get('is_skipped', False):
@@ -121,7 +136,7 @@ class ResultManager:
                 try:
                     with open(json_file, 'r') as f:
                         result = json.load(f)
-                        results.append(result)
+                        results.append(enrich_test_result(result))
                 except Exception as e:
                     logger.error(f"Error loading result from {json_file}: {e}")
             

@@ -55,10 +55,9 @@ logs/
 ehthumbs.db
 Thumbs.db
 
-# Test results and reports
+# Test results and generated output
 /test_results/
 /screenshots/
-/reports/
 /attached_assets/
 /coverage/
 /artifacts/

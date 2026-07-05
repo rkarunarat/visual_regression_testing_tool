@@ -267,10 +267,11 @@ def test_app_structure():
     try:
         ui_modules = {
             'app.py': ['def main():'],
-            'ui/config_tab.py': ['def configure_urls_tab('],
+            'ui/new_test_page.py': ['def new_test_page('],
             'ui/test_runner.py': ['def run_tests(', 'def run_single_test(', 'def run_single_test_sync('],
-            'ui/results_tab.py': ['def display_results_tab('],
-            'ui/comparison_tab.py': ['def detailed_comparison_tab('],
+            'ui/results_page.py': ['def results_page('],
+            'ui/comparison_view.py': ['def render_comparison_detail('],
+            'ui/history_page.py': ['def history_page('],
             'ui/manage_tab.py': ['def manage_test_runs_tab(', 'def cleanup_partial_results('],
             'ui/export.py': ['def export_selected_runs(', 'def export_results(', 'def build_pdf_filename(', 'def generate_pdf('],
             'ui/about_tab.py': ['def about_tab('],
@@ -340,7 +341,7 @@ def test_cleanup_functionality():
     try:
         with open('ui/manage_tab.py', 'r', encoding='utf-8') as f:
             manage_content = f.read()
-        with open('ui/config_tab.py', 'r', encoding='utf-8') as f:
+        with open('ui/new_test_page.py', 'r', encoding='utf-8') as f:
             config_content = f.read()
 
         if 'st.session_state.current_test_id = None' not in manage_content:
@@ -359,7 +360,7 @@ def test_cleanup_functionality():
             print_error("Keep partial results does not load results")
             return False
 
-        if 'Review them in Test Results/Detailed Comparison' not in config_content:
+        if 'Review them on the Results page' not in config_content:
             print_error("Keep partial results does not provide navigation guidance")
             return False
 
@@ -442,7 +443,7 @@ def test_playwright_setup():
     try:
         with open('ui/browsers.py', 'r', encoding='utf-8') as f:
             browsers_content = f.read()
-        with open('ui/config_tab.py', 'r', encoding='utf-8') as f:
+        with open('ui/new_test_page.py', 'r', encoding='utf-8') as f:
             config_content = f.read()
 
         if 'def ensure_playwright_browsers_installed(' not in browsers_content:
@@ -466,7 +467,7 @@ def test_playwright_setup():
 def test_pdf_generation():
     """Test 12: Verify PDF generation has proper fallbacks"""
     try:
-        with open('ui/comparison_tab.py', 'r', encoding='utf-8') as f:
+        with open('ui/comparison_view.py', 'r', encoding='utf-8') as f:
             comparison_content = f.read()
         with open('ui/export.py', 'r', encoding='utf-8') as f:
             export_content = f.read()
@@ -494,22 +495,24 @@ def test_region_functionality():
     try:
         with open('app.py', 'r', encoding='utf-8') as f:
             app_content = f.read()
+        with open('ui/new_test_page.py', 'r', encoding='utf-8') as f:
+            new_test_content = f.read()
         with open('ui/test_runner.py', 'r', encoding='utf-8') as f:
             runner_content = f.read()
 
-        if 'selected_region = st.selectbox' not in app_content:
+        if 'selected_region = st.selectbox' not in new_test_content:
             print_error("Region selection UI missing")
             return False
 
-        if 'selected_region' not in app_content and 'selected_region' not in runner_content:
-            print_error("Region parameter not found in app or test runner")
+        if 'selected_region' not in new_test_content and 'selected_region' not in runner_content:
+            print_error("Region parameter not found in new test page or test runner")
             return False
 
         if 'region = selected_region if selected_region != "Default" else None' not in runner_content:
             print_error("Region parameter handling missing")
             return False
 
-        if 'region_info = REGIONS[selected_region]' not in app_content:
+        if 'region_info = REGIONS[selected_region]' not in new_test_content:
             print_error("Region info display missing")
             return False
 
@@ -562,12 +565,12 @@ def test_browser_automation_regions():
 def test_default_region_behavior():
     """Test 15: Verify default region behavior works correctly"""
     try:
-        with open('app.py', 'r', encoding='utf-8') as f:
-            app_content = f.read()
+        with open('ui/new_test_page.py', 'r', encoding='utf-8') as f:
+            new_test_content = f.read()
         with open('ui/test_runner.py', 'r', encoding='utf-8') as f:
             runner_content = f.read()
 
-        if 'selected_region != "Default"' not in app_content and 'selected_region != "Default"' not in runner_content:
+        if 'selected_region != "Default"' not in new_test_content and 'selected_region != "Default"' not in runner_content:
             print_error("Default region handling missing")
             return False
 
@@ -575,7 +578,7 @@ def test_default_region_behavior():
             print_error("Default region nullification missing")
             return False
 
-        if 'if selected_region != "Default":' not in app_content:
+        if 'if selected_region != "Default":' not in new_test_content:
             print_error("Default region UI handling missing")
             return False
 

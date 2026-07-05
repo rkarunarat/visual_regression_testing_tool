@@ -93,6 +93,33 @@ def sanitize_filename(filename):
     return filename
 
 
+def enrich_test_result(result):
+    """Fill missing viewport and device fields on loaded or legacy results."""
+    from config import VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP
+
+    device = result.get('device')
+    if device and device in VIEWPORT_CONFIGS:
+        if not result.get('viewport_width'):
+            result['viewport_width'] = VIEWPORT_CONFIGS[device].get('width')
+        if not result.get('viewport_height'):
+            result['viewport_height'] = VIEWPORT_CONFIGS[device].get('height')
+    if not result.get('device_model') and device:
+        result['device_model'] = PLAYWRIGHT_DEVICE_MAP.get(device, device)
+    result.setdefault('staging_runtime_metrics', {})
+    result.setdefault('production_runtime_metrics', {})
+    return result
+
+
+def format_configured_viewport(result):
+    """Return configured viewport dimensions for display."""
+    enrich_test_result(result)
+    width = result.get('viewport_width')
+    height = result.get('viewport_height')
+    if width and height:
+        return f"{int(width)}x{int(height)}"
+    return "?x?"
+
+
 def resize_image_for_display(image, max_width=800, max_height=600):
     """Resize image for display while maintaining aspect ratio."""
     try:
