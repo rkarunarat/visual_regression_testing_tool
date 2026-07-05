@@ -10,6 +10,15 @@ Run with: python test_functionality.py
 
 import sys
 import os
+
+# Windows: force UTF-8 console output so emoji/status lines render correctly
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import subprocess
 from pathlib import Path
 import traceback
@@ -120,11 +129,11 @@ def test_imports():
     """Test 1: Verify all imports work correctly"""
     try:
         import streamlit as st
-        from browser_manager import BrowserManager
-        from image_comparator import ImageComparator
-        from results_store import ResultManager
+        from browser_automation import BrowserManager
+        from image_comparison import ImageComparator
+        from result_manager import ResultManager
         from config import BROWSERS, DEVICES, VIEWPORT_CONFIGS, PLAYWRIGHT_DEVICE_MAP
-        from utils import create_download_link, resize_image_for_display, sanitize_filename
+        from utils import resize_image_for_display, sanitize_filename, validate_url, validate_url_pairs
         
         print_info("All core imports successful")
         return True
@@ -185,7 +194,7 @@ def test_configuration_data():
 def test_utility_functions():
     """Test 3: Verify utility functions work"""
     try:
-        from utils import sanitize_filename, resize_image_for_display
+        from utils import sanitize_filename, resize_image_for_display, validate_url, validate_url_pairs
         from PIL import Image
         
         # Test filename sanitization
@@ -203,6 +212,20 @@ def test_utility_functions():
         
         print_info(f"Filename sanitization: {test_filename}")
         print_info(f"Image resize: {test_img.size} -> {resized.size}")
+
+        if not validate_url('https://example.com/page'):
+            print_error("Valid HTTPS URL rejected")
+            return False
+        if validate_url('file:///etc/passwd'):
+            print_error("file:// URL should be rejected")
+            return False
+        if validate_url('http://169.254.169.254/latest/meta-data/'):
+            print_error("Metadata URL should be rejected")
+            return False
+        invalid = validate_url_pairs([{'name': 't', 'staging_url': 'javascript:alert(1)', 'production_url': 'https://example.com'}])
+        if len(invalid) != 1:
+            print_error("validate_url_pairs did not detect invalid staging URL")
+            return False
         
         return True
     except Exception as e:
@@ -212,9 +235,9 @@ def test_utility_functions():
 def test_class_instantiation():
     """Test 4: Verify all classes can be instantiated"""
     try:
-        from browser_manager import BrowserManager
-        from image_comparator import ImageComparator
-        from results_store import ResultManager
+        from browser_automation import BrowserManager
+        from image_comparison import ImageComparator
+        from result_manager import ResultManager
         
         browser_mgr = BrowserManager()
         img_comp = ImageComparator()
@@ -240,34 +263,33 @@ def test_app_syntax():
         return False
 
 def test_app_structure():
-    """Test 6: Verify app.py has all required functions"""
+    """Test 6: Verify UI modules have all required functions"""
     try:
-        with open('app.py', 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        required_functions = [
-            'def main():',
-            'def configure_urls_tab(',
-            'def run_tests(',
-            'def display_results_tab(',
-            'def detailed_comparison_tab(',
-            'def manage_test_runs_tab(',
-            'def about_tab(',
-            'def _ensure_playwright_browsers_installed(',
-            'def generate_pdf(',
-            'def cleanup_partial_results('
-        ]
-        
+        ui_modules = {
+            'app.py': ['def main():'],
+            'ui/config_tab.py': ['def configure_urls_tab('],
+            'ui/test_runner.py': ['def run_tests(', 'def run_single_test(', 'def run_single_test_sync('],
+            'ui/results_tab.py': ['def display_results_tab('],
+            'ui/comparison_tab.py': ['def detailed_comparison_tab('],
+            'ui/manage_tab.py': ['def manage_test_runs_tab(', 'def cleanup_partial_results('],
+            'ui/export.py': ['def export_selected_runs(', 'def export_results(', 'def build_pdf_filename(', 'def generate_pdf('],
+            'ui/about_tab.py': ['def about_tab('],
+            'ui/browsers.py': ['def ensure_playwright_browsers_installed('],
+        }
+
         missing = []
-        for func in required_functions:
-            if func not in content:
-                missing.append(func)
-        
+        for filepath, required_functions in ui_modules.items():
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            for func in required_functions:
+                if func not in content:
+                    missing.append(f"{filepath}: {func}")
+
         if missing:
             print_error(f"Missing functions: {missing}")
             return False
-        
-        print_info("All required functions present")
+
+        print_info("All required functions present in UI modules")
         return True
     except Exception as e:
         print_error(f"App structure test failed: {e}")
@@ -276,27 +298,38 @@ def test_app_structure():
 def test_session_state_handling():
     """Test 7: Verify session state handling is correct"""
     try:
+        with open('ui/deps.py', 'r', encoding='utf-8') as f:
+            deps_content = f.read()
+        with open('ui/session.py', 'r', encoding='utf-8') as f:
+            session_content = f.read()
         with open('app.py', 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Check for graceful error handling
-        if 'IMPORTS_OK' not in content or 'PDF_OK' not in content:
-            print_error("Missing error handling flags")
+            app_content = f.read()
+
+        if 'IMPORTS_OK' not in deps_content or 'PDF_OK' not in deps_content:
+            print_error("Missing error handling flags in ui/deps.py")
             return False
-        
-        # Check for problematic session state modifications
-        nav_modifications = content.count('st.session_state.nav =')
-        if nav_modifications > 1:  # Only initial setup should be allowed
-            print_error(f"Found {nav_modifications} nav modifications (should be 1)")
+
+        if 'def init_session_state(' not in session_content:
+            print_error("init_session_state missing from ui/session.py")
             return False
-        
-        # Check that cleanup functions exist
-        if 'def cleanup_partial_results():' not in content:
-            print_error("cleanup_partial_results function missing")
+
+        if 'init_session_state()' not in app_content:
+            print_error("app.py does not call init_session_state()")
             return False
-        
+
+        nav_modifications = app_content.count('st.session_state.nav =')
+        if nav_modifications > 0:
+            print_error(f"Found {nav_modifications} nav modifications in app.py (should be 0)")
+            return False
+
+        with open('ui/manage_tab.py', 'r', encoding='utf-8') as f:
+            manage_content = f.read()
+        if 'def cleanup_partial_results():' not in manage_content:
+            print_error("cleanup_partial_results function missing from ui/manage_tab.py")
+            return False
+
         print_info("Session state handling is correct")
-        print_info(f"Nav modifications: {nav_modifications} (should be 1)")
+        print_info(f"Nav modifications in app.py: {nav_modifications} (should be 0)")
         return True
     except Exception as e:
         print_error(f"Session state test failed: {e}")
@@ -305,31 +338,31 @@ def test_session_state_handling():
 def test_cleanup_functionality():
     """Test 8: Verify cleanup and partial results functionality"""
     try:
-        with open('app.py', 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Check cleanup_partial_results function
-        if 'st.session_state.current_test_id = None' not in content:
+        with open('ui/manage_tab.py', 'r', encoding='utf-8') as f:
+            manage_content = f.read()
+        with open('ui/config_tab.py', 'r', encoding='utf-8') as f:
+            config_content = f.read()
+
+        if 'st.session_state.current_test_id = None' not in manage_content:
             print_error("cleanup_partial_results does not clear current_test_id")
             return False
-        
-        if 'st.session_state.test_results = []' not in content:
+
+        if 'st.session_state.test_results = []' not in manage_content:
             print_error("cleanup_partial_results does not clear test_results")
             return False
-        
-        if 'result_manager.delete_test_run(' not in content:
+
+        if 'result_manager.delete_test_run(' not in manage_content:
             print_error("cleanup_partial_results does not delete test run")
             return False
-        
-        # Check keep partial results functionality
-        if 'st.session_state.test_results = loaded' not in content:
+
+        if 'st.session_state.test_results = loaded' not in config_content:
             print_error("Keep partial results does not load results")
             return False
-        
-        if 'Review them in Test Results/Detailed Comparison' not in content:
+
+        if 'Review them in Test Results/Detailed Comparison' not in config_content:
             print_error("Keep partial results does not provide navigation guidance")
             return False
-        
+
         print_info("Cleanup and partial results functionality is correct")
         return True
     except Exception as e:
@@ -407,24 +440,23 @@ def test_requirements_file():
 def test_playwright_setup():
     """Test 11: Verify Playwright setup is correct"""
     try:
-        with open('app.py', 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Check for Playwright browser installation function
-        if 'def _ensure_playwright_browsers_installed(' not in content:
+        with open('ui/browsers.py', 'r', encoding='utf-8') as f:
+            browsers_content = f.read()
+        with open('ui/config_tab.py', 'r', encoding='utf-8') as f:
+            config_content = f.read()
+
+        if 'def ensure_playwright_browsers_installed(' not in browsers_content:
             print_error("Playwright browser installation function missing")
             return False
-        
-        # Check for browser setup button
-        if 'Setup Browsers' not in content:
+
+        if 'Setup Browsers' not in config_content:
             print_error("Browser setup button missing")
             return False
-        
-        # Check for graceful handling
-        if 'if not st.session_state.get("_pw_browsers_ready"):' not in content:
+
+        if 'if not st.session_state.get("_pw_browsers_ready"):' not in config_content:
             print_error("Playwright readiness check missing")
             return False
-        
+
         print_info("Playwright setup is correct")
         return True
     except Exception as e:
@@ -434,24 +466,23 @@ def test_playwright_setup():
 def test_pdf_generation():
     """Test 12: Verify PDF generation has proper fallbacks"""
     try:
-        with open('app.py', 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Check for PDF availability check
-        if 'if PDF_OK and st.button("Summary PDF"' not in content:
+        with open('ui/comparison_tab.py', 'r', encoding='utf-8') as f:
+            comparison_content = f.read()
+        with open('ui/export.py', 'r', encoding='utf-8') as f:
+            export_content = f.read()
+
+        if 'if PDF_OK and st.button("Summary PDF"' not in comparison_content:
             print_error("PDF generation does not check availability")
             return False
-        
-        # Check for fallback buttons
-        if 'Summary PDF (Unavailable)' not in content:
+
+        if 'Summary PDF (Unavailable)' not in comparison_content:
             print_error("PDF fallback buttons missing")
             return False
-        
-        # Check for PDF generation guard
-        if 'if not PDF_OK:' not in content:
+
+        if 'if not PDF_OK:' not in export_content:
             print_error("PDF generation guard missing")
             return False
-        
+
         print_info("PDF generation has proper fallbacks")
         return True
     except Exception as e:
@@ -462,33 +493,30 @@ def test_region_functionality():
     """Test 13: Verify region functionality is properly implemented"""
     try:
         with open('app.py', 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Check for region selection in UI
-        if 'Select Region' not in content:
+            app_content = f.read()
+        with open('ui/test_runner.py', 'r', encoding='utf-8') as f:
+            runner_content = f.read()
+
+        if 'Select Region' not in app_content:
             print_error("Region selection UI missing")
             return False
-        
-        # Check for region parameter in function signatures
-        if 'selected_region' not in content:
-            print_error("Region parameter not found in app functions")
+
+        if 'selected_region' not in app_content and 'selected_region' not in runner_content:
+            print_error("Region parameter not found in app or test runner")
             return False
-        
-        # Check for region handling in test execution
-        if 'region = selected_region if selected_region != "Default" else None' not in content:
+
+        if 'region = selected_region if selected_region != "Default" else None' not in runner_content:
             print_error("Region parameter handling missing")
             return False
-        
-        # Check for region info display
-        if 'region_info = REGIONS[selected_region]' not in content:
+
+        if 'region_info = REGIONS[selected_region]' not in app_content:
             print_error("Region info display missing")
             return False
-        
-        # Check for region in result storage
-        if "'region': selected_region if selected_region != \"Default\" else None" not in content:
+
+        if "'region': selected_region if selected_region != \"Default\" else None" not in runner_content:
             print_error("Region not stored in test results")
             return False
-        
+
         print_info("Region functionality is properly implemented")
         return True
     except Exception as e:
@@ -511,12 +539,12 @@ def test_browser_automation_regions():
             print_error("Region configuration handling missing")
             return False
         
-        # Check for region-specific context options
-        if 'context_options[\'locale\'] = region_config[\'locale\']' not in content:
+        # Check for region-specific context options (uses .get for safe defaults)
+        if "context_options['locale'] = region_config.get('locale'" not in content:
             print_error("Region locale setting missing")
             return False
-        
-        if 'context_options[\'timezone_id\'] = region_config[\'timezone\']' not in content:
+
+        if "context_options['timezone_id'] = region_config.get('timezone'" not in content:
             print_error("Region timezone setting missing")
             return False
         
@@ -535,68 +563,58 @@ def test_default_region_behavior():
     """Test 15: Verify default region behavior works correctly"""
     try:
         with open('app.py', 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Check for default region handling
-        if 'selected_region != "Default"' not in content:
+            app_content = f.read()
+        with open('ui/test_runner.py', 'r', encoding='utf-8') as f:
+            runner_content = f.read()
+
+        if 'selected_region != "Default"' not in app_content and 'selected_region != "Default"' not in runner_content:
             print_error("Default region handling missing")
             return False
-        
-        # Check that region is set to None when Default is selected
-        if 'region = selected_region if selected_region != "Default" else None' not in content:
+
+        if 'region = selected_region if selected_region != "Default" else None' not in runner_content:
             print_error("Default region nullification missing")
             return False
-        
-        # Check that region info is only shown when not default
-        if 'if selected_region != "Default":' not in content:
+
+        if 'if selected_region != "Default":' not in app_content:
             print_error("Default region UI handling missing")
             return False
-        
+
         print_info("Default region behavior is properly implemented")
         return True
     except Exception as e:
         print_error(f"Default region behavior test failed: {e}")
         return False
 
-def test_enhanced_geo_location():
-    """Test 16: Verify enhanced geo-location functionality"""
+def test_region_locale_support():
+    """Test 16: Verify region locale/timezone support in browser automation."""
     try:
         with open('browser_automation.py', 'r', encoding='utf-8') as f:
             content = f.read()
-        
-        # Check for geo-location context options
-        if 'context_options[\'geolocation\']' not in content:
-            print_error("Geo-location context option missing")
+
+        if 'region_config = REGIONS.get(region)' not in content:
+            print_error("Region configuration lookup missing")
             return False
-        
-        # Check for permissions setting
-        if 'context_options[\'permissions\']' not in content:
-            print_error("Geo-location permissions missing")
+
+        if "context_options['locale'] = region_config.get('locale'" not in content:
+            print_error("Locale context option missing")
             return False
-        
-        # Check for additional headers
-        if 'X-Country-Code' not in content:
-            print_error("Country code header missing")
+
+        if "context_options['timezone_id'] = region_config.get('timezone'" not in content:
+            print_error("Timezone context option missing")
             return False
-        
-        if 'X-Region-Code' not in content:
-            print_error("Region code header missing")
+
+        if 'Accept-Language' not in content:
+            print_error("Accept-Language header missing")
             return False
-        
-        # Check for JavaScript geo-location override
-        if 'navigator.geolocation.getCurrentPosition' not in content:
-            print_error("JavaScript geo-location override missing")
-            return False
-        
-        # Check for language override
-        if 'Object.defineProperty(navigator, \'language\'' not in content:
+
+        if "Object.defineProperty(navigator, 'language'" not in content:
             print_error("Language override missing")
             return False
-        
-        print_info("Enhanced geo-location functionality is properly implemented")
+
+        print_info("Region locale/timezone support is properly implemented")
         return True
     except Exception as e:
-        print_error(f"Enhanced geo-location test failed: {e}")
+        print_error(f"Region locale support test failed: {e}")
         return False
 
 def main():
@@ -636,7 +654,7 @@ def main():
     test_suite.run_test("Region Functionality", test_region_functionality)
     test_suite.run_test("Browser Automation Regions", test_browser_automation_regions)
     test_suite.run_test("Default Region Behavior", test_default_region_behavior)
-    test_suite.run_test("Enhanced Geo-Location", test_enhanced_geo_location)
+    test_suite.run_test("Region Locale Support", test_region_locale_support)
     
     # Deployment tests
     test_suite.run_test("Deployment Files", test_deployment_files)

@@ -5,9 +5,7 @@ associated screenshots to a filesystem structure under `test_results/`.
 It also offers utilities to list runs, compute summaries, and perform cleanup.
 """
 import json
-import os
 from datetime import datetime
-import hashlib
 from pathlib import Path
 import logging
 from typing import Dict, List, Any

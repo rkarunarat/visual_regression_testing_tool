@@ -6,22 +6,20 @@ device emulation, capture full-page screenshots, and handle common overlays.
 import asyncio
 import sys
 from playwright.async_api import async_playwright
-from config import PLAYWRIGHT_DEVICE_MAP
+from config import BROWSER_LAUNCH, BROWSERS, DEFAULT_SETTINGS, PLAYWRIGHT_DEVICE_MAP
 import io
 from PIL import Image
 import warnings
 import logging
-import platform
 import os
 import subprocess
-import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Allow very large images from full-page screenshots and silence PIL warning
-Image.MAX_IMAGE_PIXELS = None
+# Cap image size to mitigate decompression-bomb attacks from untrusted pages
+Image.MAX_IMAGE_PIXELS = 200_000_000
 try:
     warnings.filterwarnings('ignore', category=Image.DecompressionBombWarning)
 except Exception:
@@ -37,12 +35,38 @@ if sys.platform.startswith("win"):
 
 # Geo-location proxy mechanism removed - keeping simple locale support only
 
+STEALTH_INIT_SCRIPT = """
+// Reduce automation fingerprints commonly checked by bot protection (e.g. Cloudflare)
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+if (!window.chrome) {
+    window.chrome = { runtime: {} };
+}
+if (!navigator.languages || navigator.languages.length === 0) {
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+}
+"""
+
+CLOUDFLARE_TITLE_MARKERS = (
+    'just a moment',
+    'attention required',
+    'please wait',
+    'checking your browser',
+)
+
+CLOUDFLARE_BODY_MARKERS = (
+    'cf-browser-verification',
+    'challenge-platform',
+    'challenges.cloudflare.com',
+    'turnstile',
+    'verify you are human',
+)
+
+
 class BrowserManager:
     """Manage Playwright, browsers/contexts, and screenshot capture."""
     def __init__(self):
         self.playwright = None
         self.browsers = {}
-        self.contexts = {}
         self.is_wsl = self._detect_wsl()
         self.windows_browser_paths = self._get_windows_browser_paths()
     
@@ -124,6 +148,48 @@ class BrowserManager:
             return self.windows_browser_paths[browser_key]
         
         return None
+
+    def _uses_system_browser(self, browser_name):
+        """Whether to launch the locally installed Chrome/Edge instead of bundled Chromium."""
+        return (
+            browser_name in ('Chrome', 'Edge')
+            and BROWSER_LAUNCH.get('use_installed_browser', True)
+        )
+
+    def _build_launch_options(self, browser_name):
+        """Build launch options that resemble a normal desktop browser session."""
+        headless = BROWSER_LAUNCH.get('headless', True)
+        in_container = os.path.exists('/.dockerenv') or os.environ.get('CONTAINER')
+
+        args = [
+            '--disable-blink-features=AutomationControlled',
+            '--no-first-run',
+            '--no-default-browser-check',
+        ]
+        if headless and browser_name in ('Chrome', 'Edge'):
+            # Chrome new headless uses a normal user agent (no "HeadlessChrome" prefix)
+            launch_options_extra = {'ignore_default_args': ['--headless']}
+            args.append('--headless=new')
+        else:
+            launch_options_extra = {}
+        if in_container:
+            args.extend(['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'])
+
+        launch_options = {'headless': headless, 'args': args, **launch_options_extra}
+
+        browser_cfg = BROWSERS.get(browser_name, {})
+        channel = browser_cfg.get('channel')
+        if self._uses_system_browser(browser_name) and channel:
+            launch_options['channel'] = channel
+
+        if self.is_wsl and self.windows_browser_paths:
+            windows_path = self._get_windows_browser_path(browser_name)
+            if windows_path:
+                launch_options['executable_path'] = windows_path
+                launch_options.pop('channel', None)
+                logger.info("Using Windows browser: %s", windows_path)
+
+        return launch_options
     
     async def initialize(self):
         """Start Playwright if not already started."""
@@ -164,63 +230,31 @@ class BrowserManager:
             raise ValueError(f"Unsupported browser: {browser_name}")
         
         browser_engine = browser_map[browser_name]
-        
-        # Browser launch options - optimized for speed
-        launch_options = {
-            'headless': True,
-            'args': [
-                '--no-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-extensions',
-                '--disable-plugins',
-                '--no-first-run',
-                '--disable-background-timer-throttling',
-                '--disable-renderer-backgrounding',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-software-rasterizer',
-                '--disable-background-networking',
-                '--disable-default-apps',
-                '--disable-sync',
-                '--disable-ipc-flooding-protection',
-                '--disable-xvfb',
-                '--disable-web-security',
-                '--disable-features=TranslateUI',
-                '--disable-ipc-flooding-protection',
-                '--disable-hang-monitor',
-                '--disable-prompt-on-repost',
-                '--disable-domain-reliability',
-                '--disable-component-extensions-with-background-pages'
-            ]
-        }
-        
-        # Special handling for Edge
-        if browser_name == 'Edge':
-            launch_options['channel'] = 'msedge'
-        
-        # WSL + Windows browser integration
-        if self.is_wsl and self.windows_browser_paths:
-            windows_path = self._get_windows_browser_path(browser_name)
-            if windows_path:
-                launch_options['executable_path'] = windows_path
-                logger.info(f"Using Windows browser: {windows_path}")
-        
+        launch_options = self._build_launch_options(browser_name)
+
         try:
             self.browsers[browser_name] = await browser_engine.launch(**launch_options)
-            logger.info(f"Successfully launched {browser_name}")
+            logger.info(
+                "Successfully launched %s (headless=%s, channel=%s)",
+                browser_name,
+                launch_options.get('headless'),
+                launch_options.get('channel', 'bundled'),
+            )
         except Exception as e:
-            logger.warning(f"Could not launch {browser_name}: {e}")
-            # Try with minimal flags first
-            minimal_options = {
-                'headless': True,
-                'args': ['--no-sandbox', '--disable-dev-shm-usage']
+            logger.warning("Could not launch %s with system browser: %s", browser_name, e)
+            fallback = {
+                'headless': BROWSER_LAUNCH.get('headless', True),
+                'args': [
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                ],
             }
             try:
-                self.browsers[browser_name] = await browser_engine.launch(**minimal_options)
-                logger.info(f"Successfully launched {browser_name} with minimal options")
+                self.browsers[browser_name] = await browser_engine.launch(**fallback)
+                logger.info("Successfully launched %s with bundled Chromium fallback", browser_name)
             except Exception as e2:
-                logger.error(f"Launch failed for {browser_name} even with minimal options: {e2}")
+                logger.error("Launch failed for %s: %s", browser_name, e2)
                 raise
         
         return self.browsers[browser_name]
@@ -228,8 +262,9 @@ class BrowserManager:
     async def create_context(self, browser, viewport, device_name=None, user_agent=None, browser_name=None, region=None):
         """Create a browser context with viewport and optional device emulation."""
         context_options = {
-            'ignore_https_errors': True,
-            'java_script_enabled': True
+            'ignore_https_errors': DEFAULT_SETTINGS['ignore_https_errors'],
+            'java_script_enabled': True,
+            'extra_http_headers': {'Accept-Language': 'en-US,en;q=0.9'},
         }
 
         # Prefer built-in device descriptors when possible
@@ -249,6 +284,15 @@ class BrowserManager:
 
         if user_agent:
             context_options['user_agent'] = user_agent
+        elif browser_name and browser_name in BROWSERS and not used_descriptor:
+            browser_cfg = BROWSERS[browser_name]
+            use_native_ua = (
+                self._uses_system_browser(browser_name)
+                and not BROWSER_LAUNCH.get('headless', True)
+            )
+            # Headless Chrome exposes "HeadlessChrome" in UA — override for bot protection
+            if not use_native_ua and browser_cfg.get('user_agent'):
+                context_options['user_agent'] = browser_cfg['user_agent']
         
         # Add simple locale support (geo-location proxy removed)
         if region:
@@ -256,11 +300,8 @@ class BrowserManager:
             region_config = REGIONS.get(region)
             if region_config:
                 try:
-                    # Set only locale and timezone - simple approach
                     context_options['locale'] = region_config.get('locale', 'en-US')
                     context_options['timezone_id'] = region_config.get('timezone', 'UTC')
-                    
-                    # Set accept language header
                     context_options['extra_http_headers'] = {
                         'Accept-Language': region_config.get('accept_language', 'en-US,en;q=0.9')
                     }
@@ -291,10 +332,60 @@ class BrowserManager:
             else:
                 context_options['viewport'] = viewport
 
-        return await browser.new_context(**context_options)
+        context = await browser.new_context(**context_options)
+        await context.add_init_script(STEALTH_INIT_SCRIPT)
+        return context
+
+    async def _is_cloudflare_challenge(self, page):
+        """Return True when the page still looks like a Cloudflare interstitial."""
+        try:
+            title = (await page.title() or '').lower()
+            if any(marker in title for marker in CLOUDFLARE_TITLE_MARKERS):
+                return True
+            html = (await page.content() or '').lower()
+            return any(marker in html for marker in CLOUDFLARE_BODY_MARKERS)
+        except Exception:
+            return False
+
+    async def _wait_for_cloudflare(self, page):
+        """Wait for Cloudflare/Turnstile challenges to finish before screenshotting."""
+        max_wait = BROWSER_LAUNCH.get('cloudflare_wait_seconds', 20)
+        if max_wait <= 0:
+            return
+
+        deadline = asyncio.get_running_loop().time() + max_wait
+        saw_challenge = False
+
+        while asyncio.get_running_loop().time() < deadline:
+            if await self._is_cloudflare_challenge(page):
+                saw_challenge = True
+                logger.info("Cloudflare challenge detected, waiting...")
+                await asyncio.sleep(1)
+                continue
+            if saw_challenge:
+                logger.info("Cloudflare challenge appears resolved")
+                await asyncio.sleep(2)
+            return
+
+        if saw_challenge:
+            logger.warning("Cloudflare challenge may not have completed within %ss", max_wait)
+
+    async def _navigate_to_url(self, page, url):
+        """Navigate with timeouts suited to protected sites."""
+        timeout = BROWSER_LAUNCH.get('navigation_timeout_ms', DEFAULT_SETTINGS['timeout'])
+        try:
+            await page.goto(url, wait_until='domcontentloaded', timeout=timeout)
+        except Exception:
+            await page.goto(url, wait_until='load', timeout=timeout)
+        await self._wait_for_cloudflare(page)
     
     async def take_screenshot(self, url, browser_name, viewport, wait_time=3, device_name=None, return_metrics=False, region=None, max_retries=3):
         """Take a full-page screenshot and optionally return runtime metrics."""
+        from utils import validate_url
+        if not validate_url(url):
+            logger.error(f"Rejected invalid or blocked URL: {url}")
+            return None
+
         context = None
         last_error = None
         
@@ -307,27 +398,18 @@ class BrowserManager:
                     return None
                 context = await self.create_context(browser, viewport, device_name=device_name, browser_name=browser_name, region=region)
                 page = await context.new_page()
-            
-                # Simple locale injection (geo-location proxy removed)
+
                 if region:
                     from config import REGIONS
                     region_config = REGIONS.get(region, {})
                     locale = region_config.get('locale', 'en-US')
-                    
-                    # Simple language override only
                     await page.add_init_script(f"""
-                        // Simple language override
                         Object.defineProperty(navigator, 'language', {{
                             get: function() {{ return '{locale}'; }}
                         }});
                     """)
-                
-                # Navigate to URL with optimized timeout
-                try:
-                    await page.goto(url, wait_until='domcontentloaded', timeout=15000)
-                except Exception:
-                    # Fallback to load if domcontentloaded fails
-                    await page.goto(url, wait_until='load', timeout=15000)
+
+                await self._navigate_to_url(page, url)
 
                 # Quick font loading check (non-blocking)
                 try:
@@ -344,7 +426,22 @@ class BrowserManager:
                 # Capture runtime viewport metrics
                 metrics = None
                 try:
-                    metrics = await page.evaluate("() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio, userAgent: navigator.userAgent, screen: { width: window.screen.width, height: window.screen.height } })")
+                    metrics = await page.evaluate(
+                        "() => ({"
+                        " innerWidth: window.innerWidth,"
+                        " innerHeight: window.innerHeight,"
+                        " devicePixelRatio: window.devicePixelRatio,"
+                        " userAgent: navigator.userAgent,"
+                        " webdriver: navigator.webdriver,"
+                        " screen: { width: window.screen.width, height: window.screen.height }"
+                        " })"
+                    )
+                    logger.info(
+                        "Browser fingerprint for %s: ua=%s webdriver=%s",
+                        url,
+                        (metrics or {}).get('userAgent', '')[:80],
+                        (metrics or {}).get('webdriver'),
+                    )
                 except Exception:
                     metrics = None
 
@@ -451,9 +548,12 @@ class BrowserManager:
             for selector in overlay_selectors:
                 try:
                     await page.wait_for_selector(selector, timeout=1000)
-                    await page.evaluate(f'document.querySelector("{selector}").style.display = "none"')
-                except:
-                    continue  # Selector not found, continue to next
+                    await page.evaluate(
+                        "(sel) => { const el = document.querySelector(sel); if (el) el.style.display = 'none'; }",
+                        selector
+                    )
+                except Exception:
+                    continue
                     
             # Try to click common "Accept" or "Close" buttons
             accept_buttons = [
@@ -467,8 +567,8 @@ class BrowserManager:
             for button_selector in accept_buttons:
                 try:
                     await page.click(button_selector, timeout=1000)
-                    await asyncio.sleep(0.5)  # Small delay after clicking
-                except:
+                    await asyncio.sleep(0.5)
+                except Exception:
                     continue
                     
         except Exception as e:
@@ -477,23 +577,15 @@ class BrowserManager:
             pass
     
     async def cleanup(self):
-        """Close contexts/browsers and stop Playwright if started."""
+        """Close browsers and stop Playwright if started."""
         try:
-            # Close all contexts
-            for context in self.contexts.values():
-                await context.close()
-            
-            # Close all browsers
             for browser in self.browsers.values():
                 await browser.close()
             
-            # Stop playwright
             if self.playwright:
                 await self.playwright.stop()
             
-            # Reset state
             self.browsers = {}
-            self.contexts = {}
             self.playwright = None
             
         except Exception as e:
@@ -502,9 +594,7 @@ class BrowserManager:
     def __del__(self):
         """Avoid event-loop operations during interpreter shutdown."""
         try:
-            # Best-effort: don't touch asyncio loop on teardown to prevent 'Event loop is closed' errors
             self.browsers = {}
-            self.contexts = {}
             self.playwright = None
         except Exception:
             pass

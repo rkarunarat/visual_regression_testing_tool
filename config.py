@@ -1,12 +1,14 @@
 """
 Configuration file for Visual Regression Testing Tool
 """
+import os
 
 # Browser configurations
 BROWSERS = {
     'Chrome': {
         'engine': 'chromium',
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'channel': 'chrome',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36'
     },
     'Firefox': {
         'engine': 'firefox',
@@ -19,7 +21,7 @@ BROWSERS = {
     'Edge': {
         'engine': 'chromium',
         'channel': 'msedge',
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0'
     }
 }
 
@@ -163,9 +165,20 @@ VIEWPORT_CONFIGS = {
 DEFAULT_SETTINGS = {
     'similarity_threshold': 95.0,
     'wait_time': 3,  # Keep 3s for slower sites
-    'timeout': 15000,  # Reduced from 30s to 15s
+    'timeout': 45000,
     'full_page_screenshot': True,
-    'ignore_https_errors': True
+    'ignore_https_errors': os.environ.get('IGNORE_HTTPS_ERRORS', 'true').lower() in ('true', '1', 'yes'),
+}
+
+# Browser launch / anti-bot settings (Cloudflare-friendly defaults)
+BROWSER_LAUNCH = {
+    # Use installed Chrome/Edge instead of bundled Chromium when available
+    'use_installed_browser': os.environ.get('PLAYWRIGHT_USE_SYSTEM_BROWSER', 'true').lower() in ('true', '1', 'yes'),
+    # Headless mode; set PLAYWRIGHT_HEADLESS=false to run a visible browser (helps with strict CF sites)
+    'headless': os.environ.get('PLAYWRIGHT_HEADLESS', 'true').lower() in ('true', '1', 'yes'),
+    # Extra wait while Cloudflare interstitials resolve
+    'cloudflare_wait_seconds': int(os.environ.get('CLOUDFLARE_WAIT_SECONDS', '20')),
+    'navigation_timeout_ms': int(os.environ.get('PLAYWRIGHT_NAVIGATION_TIMEOUT_MS', '45000')),
 }
 
 # Image comparison settings

@@ -5,10 +5,9 @@ metrics (SSIM, pixel similarity, histogram correlation) and can generate
 overlay and difference images for analysis.
 """
 import numpy as np
-from PIL import Image, ImageDraw, ImageChops
+from PIL import Image, ImageChops
 import cv2
 from skimage.metrics import structural_similarity as ssim
-import io
 import logging
 
 logger = logging.getLogger(__name__)
@@ -227,24 +226,3 @@ class ImageComparator:
         except Exception as e:
             logger.error(f"Error creating overlay image: {e}")
             return image1  # Return original image as fallback
-    
-    def get_image_info(self, image):
-        """Return basic image metadata for diagnostics and display."""
-        return {
-            'width': image.width,
-            'height': image.height,
-            'mode': image.mode,
-            'format': image.format,
-            'size_bytes': len(image.tobytes())
-        }
-    
-    def preprocess_image(self, image):
-        """Normalize input (ensure RGB, optional blur) prior to comparison."""
-        # Convert to RGB if needed
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        
-        # Optional: Apply slight blur to reduce noise
-        # image = image.filter(ImageFilter.GaussianBlur(radius=0.5))
-        
-        return image
