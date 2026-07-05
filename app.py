@@ -13,6 +13,13 @@ from ui.deps import BROWSERS, DEVICES, IMPORTS_OK
 from ui.manage_tab import manage_test_runs_tab
 from ui.results_tab import display_results_tab
 from ui.session import init_session_state
+from ui.theme import (
+    inject_global_styles,
+    render_footer,
+    render_hero,
+    sidebar_divider,
+    sidebar_label,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,6 +42,8 @@ init_session_state()
 
 def main():
     """Render the Streamlit app and orchestrate navigation and actions."""
+    inject_global_styles()
+
     if not require_auth():
         return
 
@@ -46,23 +55,7 @@ def main():
         )
         st.stop()
 
-    st.markdown("""
-    <style>
-    .stButton > button[kind="primary"] {
-        background: #2E8B57;
-        border: none;
-        border-radius: 6px;
-        font-weight: 500;
-        color: white !important;
-    }
-    .stButton > button[kind="primary"]:hover {
-        background: #228B22;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.title("🔍 Visual Regression Testing Tool")
-    st.markdown("Professional visual comparison across multiple browsers and devices")
+    render_hero()
 
     if st.session_state.banner_message:
         if st.session_state.banner_type == "success":
@@ -76,38 +69,47 @@ def main():
         st.session_state.banner_message = None
 
     with st.sidebar:
-        nav = st.radio("Navigation", ["Run Tests", "Manage Test Runs", "About"], index=0, key="nav")
+        sidebar_label("Navigation")
+        nav = st.radio(
+            "Navigation",
+            ["Run Tests", "Manage Test Runs", "About"],
+            index=0,
+            key="nav",
+            label_visibility="collapsed",
+        )
 
     if nav == "Run Tests":
         with st.sidebar:
-            st.header("⚙️ Test Configuration")
+            sidebar_divider()
+            sidebar_label("Test Configuration")
             selected_browsers = st.multiselect(
-                "Select Browsers",
+                "Browsers",
                 options=list(BROWSERS.keys()),
                 default=["Chrome"],
                 help="Choose browsers for testing",
             )
             selected_devices = st.multiselect(
-                "Select Devices",
+                "Devices",
                 options=list(DEVICES.keys()),
                 default=["Desktop", "Mobile"],
                 help="Choose device types for testing",
             )
             selected_region = st.selectbox(
-                "🌍 Select Region",
+                "Region",
                 options=["Default"] + list(REGIONS.keys()),
                 format_func=lambda x: (
                     "Default (No region)" if x == "Default" else f"{REGIONS[x]['name']} ({x})"
                 ),
-                help="Choose region for geo-specific testing (affects locale, timezone, and language headers)",
+                help="Geo-specific locale, timezone, and language headers",
             )
             if selected_region != "Default":
                 region_info = REGIONS[selected_region]
-                st.info(
-                    f"**{region_info['name']}** - Timezone: {region_info['timezone']}, "
-                    f"Locale: {region_info['locale']}",
+                st.caption(
+                    f"{region_info['name']} · {region_info['timezone']} · {region_info['locale']}"
                 )
-            st.subheader("🎯 Comparison Settings")
+
+            sidebar_divider()
+            sidebar_label("Comparison Settings")
             similarity_threshold = st.slider(
                 "Similarity Threshold (%)",
                 min_value=50,
@@ -116,7 +118,7 @@ def main():
                 help="Minimum similarity percentage to consider images as matching",
             )
             wait_time = st.number_input(
-                "Page Load Wait Time (seconds)",
+                "Page Load Wait (seconds)",
                 min_value=1,
                 max_value=30,
                 value=3,
@@ -137,12 +139,7 @@ def main():
     elif nav == "About":
         about_tab()
 
-    st.markdown("<hr/>", unsafe_allow_html=True)
-    st.markdown(
-        "<div style='text-align:center; opacity:0.8; font-size:13px;'>"
-        "Made with ❤️ by Roshan Karunarathna</div>",
-        unsafe_allow_html=True,
-    )
+    render_footer()
 
 
 if __name__ == "__main__":

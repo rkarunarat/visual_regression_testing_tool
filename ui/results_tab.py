@@ -4,11 +4,15 @@ import streamlit as st
 
 from ui.deps import PLAYWRIGHT_DEVICE_MAP
 from ui.export import export_results
+from ui.theme import render_page_header
 
 
 def display_results_tab():
     """Show aggregate metrics and a filterable table of results."""
-    st.header("Test Results")
+    render_page_header(
+        "Test Results",
+        "Review pass rates, filter outcomes, and export your latest run.",
+    )
 
     if not st.session_state.test_results:
         st.info("No test results available. Run some tests first!")

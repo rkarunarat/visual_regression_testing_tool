@@ -4,12 +4,16 @@ import streamlit as st
 from ui.deps import ImageComparator, PDF_OK, PLAYWRIGHT_DEVICE_MAP
 from ui.export import build_pdf_filename, generate_pdf
 from ui.helpers import load_image_from_result
+from ui.theme import render_page_header, status_chip
 from utils import resize_image_for_display
 
 
 def detailed_comparison_tab():
     """Provide side-by-side, overlay, and diff visualizations per test."""
-    st.header("Detailed Comparison")
+    render_page_header(
+        "Detailed Comparison",
+        "Inspect screenshots side-by-side, overlay views, and visual diffs.",
+    )
 
     if not st.session_state.test_results:
         st.info("No test results available. Run some tests first!")
@@ -29,12 +33,7 @@ def detailed_comparison_tab():
     if selected_test is not None:
         result = st.session_state.test_results[selected_test]
 
-        st.markdown(
-            "<style>.sticky-top{position:sticky; top:0; z-index:5; "
-            "background:var(--background-color,#fff); padding:8px 0; border-bottom:1px solid #eee}</style>",
-            unsafe_allow_html=True,
-        )
-        st.markdown('<div class="sticky-top">', unsafe_allow_html=True)
+        st.markdown('<div class="vrt-sticky-top">', unsafe_allow_html=True)
         top_left, top_right = st.columns([3, 2])
         with top_left:
             st.markdown("**Staging URL**")
@@ -84,14 +83,11 @@ def detailed_comparison_tab():
                 else device
             )
             vp = f"{result.get('viewport_width', '?')}x{result.get('viewport_height', '?')}"
-            st.markdown(
-                "<style>.wrap-val{font-size:22px; font-weight:600; "
-                "line-height:1.25; word-break:break-word;}</style>",
-                unsafe_allow_html=True,
-            )
             st.caption("Browser / Device")
             st.markdown(
-                f"<div class='wrap-val'>{result['browser']} / {device_display} @ {vp}</div>",
+                f"<div style='font-size:1.15rem;font-weight:600;line-height:1.3;"
+                f"word-break:break-word;color:#0f172a;'>{result['browser']} / "
+                f"{device_display} @ {vp}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -100,13 +96,6 @@ def detailed_comparison_tab():
             ["Side by Side", "Overlay", "Difference Only"],
             horizontal=True,
         )
-
-        def chip(text):
-            return (
-                "<span style='display:inline-block;padding:2px 8px;margin-right:6px;"
-                "border:1px solid #ddd;border-radius:999px;font-size:12px;'>"
-                f"{text}</span>"
-            )
 
         device_model = PLAYWRIGHT_DEVICE_MAP.get(result['device'], result['device'])
         vp_cfg = f"{result.get('viewport_width', '?')}x{result.get('viewport_height', '?')}"
@@ -118,20 +107,16 @@ def detailed_comparison_tab():
         )
         status = 'PASS' if result['is_match'] else 'FAIL'
         st.markdown(
-            chip(f"Browser: {result['browser']}") +
-            chip(f"Device: {device_model}") +
-            chip(f"Viewport cfg: {vp_cfg}") +
-            chip(f"Viewport rt: {vp_rt}") +
-            chip(f"Status: {status}"),
+            status_chip(f"Browser: {result['browser']}")
+            + status_chip(f"Device: {device_model}")
+            + status_chip(f"Viewport cfg: {vp_cfg}")
+            + status_chip(f"Viewport rt: {vp_rt}")
+            + status_chip(f"Status: {status}"),
             unsafe_allow_html=True,
         )
 
         if comparison_mode == "Side by Side":
-            st.markdown(
-                "<style>[data-testid='stImage']{max-height:70vh; overflow:auto; "
-                "border:1px solid #eee; border-radius:6px; padding:8px;}</style>",
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="vrt-image-panel">', unsafe_allow_html=True)
             staging_loaded = load_image_from_result(result, 'staging_screenshot')
             production_loaded = load_image_from_result(result, 'production_screenshot')
 
@@ -161,6 +146,7 @@ def detailed_comparison_tab():
                 img = resize_image_for_display(available_img, max_width=1400, max_height=1600)
                 st.image(img, use_container_width=True)
                 st.caption(available_url or 'URL not available')
+            st.markdown('</div>', unsafe_allow_html=True)
 
         elif comparison_mode == "Overlay":
             st.subheader("Overlay Comparison")

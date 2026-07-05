@@ -497,7 +497,7 @@ def test_region_functionality():
         with open('ui/test_runner.py', 'r', encoding='utf-8') as f:
             runner_content = f.read()
 
-        if 'Select Region' not in app_content:
+        if 'selected_region = st.selectbox' not in app_content:
             print_error("Region selection UI missing")
             return False
 

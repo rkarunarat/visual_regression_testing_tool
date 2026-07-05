@@ -4,6 +4,8 @@ import os
 
 import streamlit as st
 
+from ui.theme import inject_global_styles
+
 
 def _configured_password():
     """Return the configured app password, or empty string if auth is disabled."""
@@ -22,10 +24,18 @@ def require_auth():
     if st.session_state.get("authenticated"):
         return True
 
-    st.title("Visual Regression Testing Tool")
-    st.caption("Authentication required")
+    inject_global_styles()
+    st.markdown(
+        """
+        <div class="vrt-auth-wrap">
+            <h1 class="vrt-auth-title">Visual Regression Testing</h1>
+            <p class="vrt-auth-subtitle">Sign in to access the testing dashboard</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     password = st.text_input("Password", type="password", key="auth_password")
-    if st.button("Sign in", type="primary"):
+    if st.button("Sign in", type="primary", use_container_width=True):
         if hmac.compare_digest(password, expected):
             st.session_state.authenticated = True
             st.rerun()

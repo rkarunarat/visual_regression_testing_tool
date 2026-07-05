@@ -9,6 +9,7 @@ from result_manager import ResultManager
 from ui.browsers import ensure_playwright_browsers_installed
 from ui.test_runner import run_tests
 from ui.manage_tab import cleanup_partial_results
+from ui.theme import render_page_header
 from utils import validate_url_pairs
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,10 @@ logger = logging.getLogger(__name__)
 
 def configure_urls_tab(selected_browsers, selected_devices, similarity_threshold, wait_time, selected_region):
     """Collect URL pairs and handle kicking off a test run."""
-    st.header("URL Configuration")
+    render_page_header(
+        "URL Configuration",
+        "Add staging and production URL pairs, then launch your visual regression run.",
+    )
 
     if not st.session_state.get("_pw_browsers_ready"):
         if st.button("Setup Browsers", type="primary"):

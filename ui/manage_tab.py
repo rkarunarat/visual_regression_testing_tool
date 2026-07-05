@@ -7,6 +7,7 @@ import streamlit as st
 
 from ui.deps import ResultManager
 from ui.export import export_selected_runs
+from ui.theme import render_page_header
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,10 @@ def cleanup_partial_results():
 
 def manage_test_runs_tab():
     """List runs, load/export/delete them, and clean up storage."""
-    st.header("Manage Test Runs")
+    render_page_header(
+        "Manage Test Runs",
+        "Browse saved runs, export archives, and manage storage.",
+    )
 
     result_manager = ResultManager()
     test_runs = result_manager.list_test_runs()
